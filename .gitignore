@@ -6,16 +6,24 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
 
+# Build output
 node_modules
 dist
 dist-ssr
 *.local
 
-# Environment files — never commit secrets
+# Environment files — NEVER commit these; they contain secrets
 .env
 .env.local
 .env.*.local
+
+# Firebase local emulator data and CLI output
+.firebase/
+.firebaserc.local
 
 # Editor directories and files
 .vscode/*

@@ -1,17 +1,14 @@
-// Firebase initialization for ScamShield
-// Using the modular Firebase JS SDK (tree-shakeable imports)
+// Firebase initialisation for ScamShield.
+// This file sets up the core Firebase app, App Check, and the AI service.
+// It exports `app` and `ai` only — model instances live in src/ai/models.js.
 
 import { initializeApp } from 'firebase/app';
-import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
-import {
-  getAI,
-  getGenerativeModel,
-  GoogleAIBackend,
-  InferenceMode,
-} from 'firebase/ai';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
+import { getAI, GoogleAIBackend } from 'firebase/ai';
 
 // ---------------------------------------------------------------------------
 // Firebase project config (public — safe to commit)
+// All these values are visible in the browser anyway; they are not secrets.
 // ---------------------------------------------------------------------------
 const firebaseConfig = {
   apiKey: 'AIzaSyAf02hOS0zaKgADhWdrx1RBpzeYr57g4pk',
@@ -24,9 +21,21 @@ const firebaseConfig = {
 };
 
 // ---------------------------------------------------------------------------
-// App Check debug token — only in Vite dev mode.
-// Must be set on `self` BEFORE initializeApp is called.
-// In production this is never set; a real reCAPTCHA token is used instead.
+// App Check debug token — DEV mode only.
+//
+// In development, App Check can't use reCAPTCHA (no real token is generated
+// for localhost). Instead we set a debug token so the SDK accepts our requests.
+//
+// Two ways this can be set:
+//   1. VITE_FIREBASE_APPCHECK_DEBUG_TOKEN in .env.local (a specific token you
+//      registered in the Firebase console — preferred, keeps the same token
+//      across restarts so you don't need to re-register each time)
+//   2. Fallback `true` — the SDK auto-generates a random token and logs it to
+//      the console. You then copy it and register it in the Firebase console
+//      under App Check → Apps → Manage debug tokens.
+//
+// MUST be set on `self` BEFORE initializeApp is called.
+// Never ships to production — the `if (DEV)` block is tree-shaken by Vite.
 // ---------------------------------------------------------------------------
 if (import.meta.env.DEV) {
   self.FIREBASE_APPCHECK_DEBUG_TOKEN =
@@ -36,57 +45,24 @@ if (import.meta.env.DEV) {
 // ---------------------------------------------------------------------------
 // Initialize Firebase app
 // ---------------------------------------------------------------------------
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 
 // ---------------------------------------------------------------------------
-// App Check — protects your backend resources from abuse.
-// Site key comes from an env variable so the SECRET key is never in source.
+// App Check — protects Firebase backend resources from unauthorized access.
+// Uses reCAPTCHA Enterprise (register your site key in the Firebase console
+// under App Check → Apps → reCAPTCHA Enterprise).
+// The site key is kept in .env.local (never committed to source control).
 // ---------------------------------------------------------------------------
 initializeAppCheck(app, {
-  provider: new ReCaptchaV3Provider(import.meta.env.VITE_RECAPTCHA_SITE_KEY),
+  provider: new ReCaptchaEnterpriseProvider(
+    import.meta.env.VITE_RECAPTCHA_SITE_KEY
+  ),
   isTokenAutoRefreshEnabled: true,
 });
 
 // ---------------------------------------------------------------------------
-// Firebase AI Logic service (Gemini Developer API backend)
+// Firebase AI Logic service — Gemini Developer API backend.
+// `ai` is passed to getGenerativeModel() in src/ai/models.js to create
+// the on-device and cloud model instances.
 // ---------------------------------------------------------------------------
-const ai = getAI(app, { backend: new GoogleAIBackend() });
-
-// ---------------------------------------------------------------------------
-// On-device model (Gemini Nano running in Chrome via the Prompt API)
-//
-// HybridParams shape (verified from @firebase/ai type definitions):
-//   { mode, onDeviceParams?: { createOptions?: LanguageModelCreateOptions } }
-//
-// LanguageModelCreateOptions.expectedInputs / expectedOutputs accept an array
-// of LanguageModelExpected objects: { type: 'text'|'image'|'audio', languages?: string[] }
-// Declaring these explicitly silences Chrome's "No output language specified" warning.
-// ---------------------------------------------------------------------------
-export const deviceModel = getGenerativeModel(ai, {
-  mode: InferenceMode.ONLY_ON_DEVICE,
-  onDeviceParams: {
-    createOptions: {
-      // Tell Chrome's Prompt API what inputs this session will receive
-      expectedInputs: [
-        { type: 'text', languages: ['en'] },
-        { type: 'image' },        // for screenshot scam checks (no language needed)
-      ],
-      // Tell Chrome's Prompt API what language the output will be in
-      expectedOutputs: [
-        { type: 'text', languages: ['en'] },
-      ],
-    },
-  },
-});
-
-// ---------------------------------------------------------------------------
-// Cloud model (Gemini 2.0 Flash via Gemini Developer API)
-// Used for the optional "Investigate deeper" feature with Google Search grounding.
-// All text sent here must already be masked by maskMessage.js (on-device step).
-// ---------------------------------------------------------------------------
-export const cloudModel = getGenerativeModel(ai, {
-  mode: InferenceMode.ONLY_IN_CLOUD,
-  inCloudParams: {
-    model: 'gemini-2.0-flash',
-  },
-});
+export const ai = getAI(app, { backend: new GoogleAIBackend() });
