@@ -40,7 +40,7 @@ using Firebase AI Logic **hybrid inference**.
 
 ## Firebase project
 
-- **Project ID:** `scamshield-a7d0c`
+- **Project ID:** `scamshield-9b81e`
 - **Provider:** Gemini Developer API (`GoogleAIBackend`)
 - **firebase version:** `12.19.0` — do NOT upgrade or downgrade (a newer version failed to install)
 - **App Check provider:** `ReCaptchaEnterpriseProvider` (changed from v3 in session 2)

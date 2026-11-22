@@ -11,13 +11,13 @@ import { getAI, GoogleAIBackend } from 'firebase/ai';
 // All these values are visible in the browser anyway; they are not secrets.
 // ---------------------------------------------------------------------------
 const firebaseConfig = {
-  apiKey: 'AIzaSyAf02hOS0zaKgADhWdrx1RBpzeYr57g4pk',
-  authDomain: 'scamshield-a7d0c.firebaseapp.com',
-  projectId: 'scamshield-a7d0c',
-  storageBucket: 'scamshield-a7d0c.firebasestorage.app',
-  messagingSenderId: '882261842112',
-  appId: '1:882261842112:web:f794721afcd71f7e6ef525',
-  measurementId: 'G-VYN8HBS1YP',
+  apiKey: 'AIzaSyC7NQtofCOJ-HctFCEImGmK5GySBlQDFFQ',
+  authDomain: 'scamshield-9b81e.firebaseapp.com',
+  projectId: 'scamshield-9b81e',
+  storageBucket: 'scamshield-9b81e.firebasestorage.app',
+  messagingSenderId: '920652734024',
+  appId: '1:920652734024:web:673a5c92ebf271565ac27d',
+  measurementId: 'G-SQ2H0MMS4J',
 };
 
 // ---------------------------------------------------------------------------
