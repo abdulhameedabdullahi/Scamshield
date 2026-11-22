@@ -5,5 +5,5 @@ export const APP_NAME = 'ScamShield';
 
 // IMPORTANT: Verify this model name in the Firebase AI Logic docs before shipping.
 // Supported models: https://firebase.google.com/docs/ai-logic/models
-// Update to 'gemini-2.0-flash' or the latest recommended lite model as needed.
-export const CLOUD_MODEL = 'gemini-2.0-flash-lite';
+// Confirmed working model name as of Nov 2026 (gemini-2.0-flash-lite was retired).
+export const CLOUD_MODEL = 'gemini-3.5-flash-lite';

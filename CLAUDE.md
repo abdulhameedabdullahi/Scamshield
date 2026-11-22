@@ -170,5 +170,5 @@ const status = await getOnDeviceAvailability();
 - Switched from `ReCaptchaV3Provider` to `ReCaptchaEnterpriseProvider` (matches Firebase console setup).
 - Moved model creation to `src/ai/models.js`; `firebase.js` now only exports `app` and `ai`.
 - Added `preferOnDeviceModel` (PREFER_ON_DEVICE) for the scam check — the previous `deviceModel` was ONLY_ON_DEVICE which would error if Nano was unavailable.
-- `CLOUD_MODEL` constant in `src/config.js`; default is `'gemini-2.0-flash-lite'` (verify model name in Firebase AI Logic docs before shipping).
+- `CLOUD_MODEL` constant in `src/config.js`; currently `'gemini-3.5-flash-lite'` (confirmed working Nov 2026; `gemini-2.0-flash-lite` was retired).
 - Added `regexMask()` as a PII safety net in `maskMessage.js` — currently the only masking in use until the AI masking prompt is written.
