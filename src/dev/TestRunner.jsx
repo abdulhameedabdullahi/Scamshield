@@ -1,29 +1,45 @@
 // TestRunner — developer tool for batch-testing ScamShield's on-device accuracy.
 //
-// Runs all 14 synthetic test messages through onDeviceCheck() and shows a table
-// with expected vs actual verdict, category, confidence, and timing.
-// Reports overall accuracy as a percentage.
+// Steps before the first test message:
+//   1. Warm-up: warmUpDeviceModel() — creates the Chrome session, records warm-up time.
 //
-// Uses onDeviceCheck() directly (no routing) to skip the availability check
-// overhead on each iteration.  Assumes the model is already downloaded.
+// Timing reported:
+//   - Warm-up time (session creation + tiny inference)
+//   - First-run time (message #1 — often slower as the model settles in memory)
+//   - Average time for messages #2-14 (represents steady-state performance)
+//
+// Uses onDeviceCheck() directly (no routing overhead per test).
 
 import { useState } from 'react';
-import { onDeviceCheck } from '../ai/checkMessage';
+import { onDeviceCheck, warmUpDeviceModel } from '../ai/checkMessage';
 import { TEST_MESSAGES } from './testMessages';
 
-const STATUS = { idle: 'idle', running: 'running', done: 'done' };
+const STATUS = { idle: 'idle', warming: 'warming', running: 'running', done: 'done' };
 
 export default function TestRunner() {
   const [status, setStatus] = useState(STATUS.idle);
   const [rows, setRows] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
+  const [warmupMs, setWarmupMs] = useState(null);
   const [error, setError] = useState('');
 
   async function runTests() {
-    setStatus(STATUS.running);
+    setStatus(STATUS.warming);
     setRows([]);
+    setWarmupMs(null);
     setError('');
 
+    // ── Warm-up step ──────────────────────────────────────────────────────────
+    const warmStart = Date.now();
+    try {
+      await warmUpDeviceModel();
+    } catch {
+      // warmUpDeviceModel swallows errors internally; this is belt-and-suspenders
+    }
+    setWarmupMs(Date.now() - warmStart);
+
+    // ── Run tests ─────────────────────────────────────────────────────────────
+    setStatus(STATUS.running);
     const results = [];
 
     for (let i = 0; i < TEST_MESSAGES.length; i++) {
@@ -67,7 +83,6 @@ export default function TestRunner() {
       }
 
       results.push(row);
-      // Update rows incrementally so the table fills as tests run
       setRows([...results]);
     }
 
@@ -75,10 +90,19 @@ export default function TestRunner() {
     setCurrentIndex(-1);
   }
 
+  // ── Summary stats ──────────────────────────────────────────────────────────
   const verdictCorrect = rows.filter((r) => r.verdictMatch).length;
   const categoryCorrect = rows.filter((r) => r.categoryMatch && !r.error).length;
   const totalDone = rows.length;
   const verdictAccuracy = totalDone > 0 ? Math.round((verdictCorrect / totalDone) * 100) : null;
+
+  const firstRunMs = rows[0]?.durationMs ?? null;
+  const restRows = rows.slice(1).filter((r) => !r.error);
+  const avgRestMs = restRows.length > 0
+    ? Math.round(restRows.reduce((s, r) => s + r.durationMs, 0) / restRows.length)
+    : null;
+
+  const isRunning = status === STATUS.running || status === STATUS.warming;
 
   return (
     <div style={styles.wrap}>
@@ -87,18 +111,20 @@ export default function TestRunner() {
         <div style={styles.headerRight}>
           {status === STATUS.done && (
             <span style={styles.accuracy}>
-              Verdict accuracy: {verdictAccuracy}% ({verdictCorrect}/{totalDone})
+              {verdictAccuracy}% verdict ({verdictCorrect}/{totalDone})
               {' · '}
-              Category: {categoryCorrect}/{totalDone}
+              {categoryCorrect}/{totalDone} category
             </span>
           )}
           <button
-            style={{ ...styles.runBtn, ...(status === STATUS.running ? styles.runBtnDisabled : {}) }}
+            style={{ ...styles.runBtn, ...(isRunning ? styles.runBtnDisabled : {}) }}
             onClick={runTests}
-            disabled={status === STATUS.running}
+            disabled={isRunning}
             type="button"
           >
-            {status === STATUS.running
+            {status === STATUS.warming
+              ? 'Warming up…'
+              : status === STATUS.running
               ? `Running ${currentIndex + 1} / ${TEST_MESSAGES.length}…`
               : status === STATUS.done
               ? 'Run again'
@@ -106,6 +132,21 @@ export default function TestRunner() {
           </button>
         </div>
       </div>
+
+      {/* Timing summary */}
+      {status === STATUS.done && (warmupMs != null || firstRunMs != null) && (
+        <div style={styles.timingSummary}>
+          {warmupMs != null && (
+            <span style={styles.timingPill}>Warm-up: {warmupMs.toLocaleString()} ms</span>
+          )}
+          {firstRunMs != null && (
+            <span style={styles.timingPill}>First run: {firstRunMs.toLocaleString()} ms</span>
+          )}
+          {avgRestMs != null && (
+            <span style={styles.timingPill}>Avg (runs 2–{totalDone}): {avgRestMs.toLocaleString()} ms</span>
+          )}
+        </div>
+      )}
 
       {error && <p style={styles.errorMsg}>{error}</p>}
 
@@ -148,7 +189,10 @@ export default function TestRunner() {
                     )}
                   </td>
                   <td style={styles.td}>{row.confidence}</td>
-                  <td style={styles.td}>{row.durationMs.toLocaleString()} ms</td>
+                  <td style={{ ...styles.td, ...(row.id === 1 ? styles.firstRunCell : {}) }}>
+                    {row.durationMs.toLocaleString()} ms
+                    {row.id === 1 && <span style={styles.firstRunTag}> first</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -196,7 +240,7 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 12,
     flexWrap: 'wrap',
   },
   headerRight: {
@@ -231,6 +275,20 @@ const styles = {
   runBtnDisabled: {
     background: '#9ca3af',
     cursor: 'not-allowed',
+  },
+  timingSummary: {
+    display: 'flex',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginBottom: 12,
+  },
+  timingPill: {
+    fontSize: '0.78rem',
+    background: '#e0f2fe',
+    color: '#0369a1',
+    padding: '3px 10px',
+    borderRadius: 99,
+    fontWeight: 600,
   },
   errorMsg: {
     color: '#dc2626',
@@ -271,4 +329,6 @@ const styles = {
   categoryFail: { color: '#dc2626', fontWeight: 600 },
   categoryActual: { color: '#6b7280', fontSize: '0.75rem' },
   errorCell: { color: '#dc2626', fontWeight: 600, cursor: 'help' },
+  firstRunCell: { fontWeight: 600 },
+  firstRunTag: { fontSize: '0.72rem', color: '#6b7280', fontWeight: 400 },
 };

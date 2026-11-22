@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { APP_NAME } from './config';
 import { getOnDeviceAvailability } from './ai/availability';
-import { checkMessage, downloadAndCheck, cloudCheck, preloadDeviceModel } from './ai/checkMessage';
+import {
+  checkMessage, downloadAndCheck, cloudCheck,
+  preloadDeviceModel, warmUpDeviceModel,
+} from './ai/checkMessage';
 import ModelStatus from './components/ModelStatus';
 import MessageInput from './components/MessageInput';
 import VerdictCard from './components/VerdictCard';
@@ -10,13 +13,13 @@ import DevTestPanel from './components/DevTestPanel';
 import TestRunner from './dev/TestRunner';
 
 // App-level state machine:
-//   idle          → waiting for user to type and click Check
-//   checking      → checkMessage() in progress
+//   idle           → waiting for user to type and click Check
+//   checking       → model is generating (streaming in progress)
 //   needs_download → model not downloaded; waiting for user gesture
-//   downloading   → preloadDeviceModel or downloadAndCheck in progress
-//   needs_consent → on-device unavailable; waiting for consent to cloud check
-//   done          → result is ready
-//   error         → an error occurred
+//   downloading    → preloadDeviceModel or downloadAndCheck in progress
+//   needs_consent  → on-device unavailable; waiting for consent to cloud check
+//   done           → result is ready
+//   error          → an error occurred
 
 export default function App() {
   const [appState, setAppState] = useState('idle');
@@ -27,14 +30,49 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [devOpen, setDevOpen] = useState(false);
 
+  // ── Live check progress ────────────────────────────────────────────────────
+  const [checkStartTime, setCheckStartTime] = useState(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [charsReceived, setCharsReceived] = useState(0);
+
+  // Tick elapsed time every 100 ms while a check is running
+  useEffect(() => {
+    if (!checkStartTime) return;
+    const id = setInterval(() => setElapsedMs(Date.now() - checkStartTime), 100);
+    return () => clearInterval(id);
+  }, [checkStartTime]);
+
+  // ── Availability + warm-up ─────────────────────────────────────────────────
   useEffect(() => {
     getOnDeviceAvailability().then(setAvailability);
   }, []);
 
+  useEffect(() => {
+    // When the model is already on-device, pre-create the Chrome session so
+    // the first real check doesn't pay the cold-start cost (~5-10 s).
+    // No user gesture needed when availability is 'available' (no download triggered).
+    if (availability === 'available') {
+      warmUpDeviceModel();
+    }
+  }, [availability]);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  function startProgress() {
+    setCheckStartTime(Date.now());
+    setCharsReceived(0);
+  }
+
+  function stopProgress() {
+    setCheckStartTime(null);
+  }
+
   function handleTextChange(newText) {
     setText(newText);
-    // Clear results when the user edits the message after a check
-    if (appState === 'done' || appState === 'error' || appState === 'needs_consent' || appState === 'needs_download') {
+    if (
+      appState === 'done' || appState === 'error' ||
+      appState === 'needs_consent' || appState === 'needs_download'
+    ) {
       setAppState('idle');
       setResult(null);
       setErrorMsg('');
@@ -48,16 +86,18 @@ export default function App() {
     setErrorMsg('');
   }
 
-  // ── Main check entry point ────────────────────────────────────────────────
+  // ── Main check entry point ─────────────────────────────────────────────────
 
   async function handleCheck() {
     if (!text.trim()) return;
     setAppState('checking');
     setResult(null);
     setErrorMsg('');
+    startProgress();
 
     try {
-      const outcome = await checkMessage(text);
+      const outcome = await checkMessage(text, (chars) => setCharsReceived(chars));
+      stopProgress();
 
       if (outcome.state === 'needs_download') {
         setAvailability(outcome.availability);
@@ -66,26 +106,28 @@ export default function App() {
         setAvailability(outcome.availability);
         setAppState('needs_consent');
       } else {
-        // Got a real result
         setResult(outcome);
-        setAvailability(outcome.source === 'on-device' ? 'available' : availability);
+        if (outcome.source === 'on-device') setAvailability('available');
         setAppState('done');
       }
     } catch (err) {
+      stopProgress();
       setErrorMsg(err?.message ?? 'An unexpected error occurred. Please try again.');
       setAppState('error');
     }
   }
 
-  // ── Download & check (must be a click handler → user gesture) ────────────
+  // ── Download & check (must be a click handler → user gesture) ─────────────
 
   const handleDownloadAndCheck = useCallback(async () => {
     setAppState('downloading');
     setDownloadProgress(0);
     try {
-      const outcome = await downloadAndCheck(text, (p) => {
-        setDownloadProgress(Math.round(p * 100));
-      });
+      const outcome = await downloadAndCheck(
+        text,
+        (p) => setDownloadProgress(Math.round(p * 100)),
+        (chars) => setCharsReceived(chars),
+      );
       setResult(outcome);
       setAvailability('available');
       setAppState('done');
@@ -95,15 +137,13 @@ export default function App() {
     }
   }, [text]);
 
-  // ── Pre-download without a pending check (from ModelStatus button) ────────
+  // ── Pre-download without a pending check ──────────────────────────────────
 
   const handlePreload = useCallback(async () => {
     setAppState('downloading');
     setDownloadProgress(0);
     try {
-      await preloadDeviceModel((p) => {
-        setDownloadProgress(Math.round(p * 100));
-      });
+      await preloadDeviceModel((p) => setDownloadProgress(Math.round(p * 100)));
       setAvailability('available');
       setAppState('idle');
     } catch (err) {
@@ -112,15 +152,20 @@ export default function App() {
     }
   }, []);
 
-  // ── Cloud consent path ────────────────────────────────────────────────────
+  // ── Cloud consent path ─────────────────────────────────────────────────────
 
   async function handleConsent() {
     setAppState('checking');
+    setResult(null);
+    setErrorMsg('');
+    startProgress();
     try {
-      const outcome = await cloudCheck(text);
+      const outcome = await cloudCheck(text, (chars) => setCharsReceived(chars));
+      stopProgress();
       setResult(outcome);
       setAppState('done');
     } catch (err) {
+      stopProgress();
       setErrorMsg(err?.message ?? 'Cloud check failed. Please try again.');
       setAppState('error');
     }
@@ -130,10 +175,14 @@ export default function App() {
     setAppState('idle');
   }
 
-  // ── Derived state ─────────────────────────────────────────────────────────
+  // ── Derived state ──────────────────────────────────────────────────────────
 
   const isChecking = appState === 'checking';
   const isDownloading = appState === 'downloading';
+
+  const checkingLabel = availability === 'available'
+    ? 'Analysing privately on your device…'
+    : 'Analysing via cloud…';
 
   return (
     <div style={styles.container}>
@@ -153,12 +202,9 @@ export default function App() {
         onDownloadRequest={handlePreload}
       />
 
-      {/* Consent gate — shown when on-device is unavailable */}
+      {/* Consent gate */}
       {appState === 'needs_consent' && (
-        <ConsentDialog
-          onConsent={handleConsent}
-          onDecline={handleDecline}
-        />
+        <ConsentDialog onConsent={handleConsent} onDecline={handleDecline} />
       )}
 
       {/* Message input */}
@@ -170,7 +216,19 @@ export default function App() {
         disabled={isChecking || isDownloading}
       />
 
-      {/* Download-and-check prompt — shown after routing returns needs_download */}
+      {/* Live progress indicator while checking */}
+      {isChecking && (
+        <div style={styles.progressBox}>
+          <span style={styles.progressDot} />
+          <span style={styles.progressText}>{checkingLabel}</span>
+          <span style={styles.progressStats}>
+            {charsReceived > 0 && `${charsReceived} chars · `}
+            {(elapsedMs / 1000).toFixed(1)}s
+          </span>
+        </div>
+      )}
+
+      {/* Download-and-check prompt */}
       {appState === 'needs_download' && (
         <div style={styles.downloadPrompt}>
           <p style={styles.downloadPromptText}>
@@ -193,7 +251,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Error message */}
+      {/* Error */}
       {appState === 'error' && errorMsg && (
         <div style={styles.errorBox}>
           <strong>Error: </strong>{errorMsg}
@@ -246,6 +304,35 @@ const styles = {
     fontSize: '0.95rem',
     margin: 0,
     lineHeight: 1.5,
+  },
+  progressBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '10px 14px',
+    marginTop: 12,
+    background: '#eff6ff',
+    border: '1px solid #bfdbfe',
+    borderRadius: 8,
+    fontSize: '0.875rem',
+    color: '#1e3a8a',
+  },
+  progressDot: {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: '#3b82f6',
+    animation: 'pulse 1.2s ease-in-out infinite',
+    flexShrink: 0,
+  },
+  progressText: {
+    flex: 1,
+  },
+  progressStats: {
+    fontSize: '0.82rem',
+    opacity: 0.8,
+    whiteSpace: 'nowrap',
   },
   downloadPrompt: {
     background: '#eff6ff',

@@ -8,18 +8,17 @@
 //   availability == 'downloadable' | 'downloading'
 //     → return { state: 'needs_download', availability }
 //       UI shows "Download private AI model" button
-//       On button click (user gesture!) → downloadAndCheck(text, onProgress)
+//       On button click (user gesture!) → downloadAndCheck(text, ...)
 //
 //   availability == 'unavailable' | 'unsupported'
 //     → return { state: 'needs_consent', availability }
 //       UI shows ConsentDialog explaining text goes to cloud
 //       On consent → cloudCheck(text)   text is regex-masked before leaving device
 //
-// WHY NOT PREFER_ON_DEVICE:
-//   PREFER_ON_DEVICE silently falls back when Gemini Nano is unavailable,
-//   sending raw (unmasked) text to the cloud without the user's knowledge.
-//   This breaks the privacy promise. Explicit routing ensures the user
-//   always knows where their text goes.
+// STREAMING: both onDeviceCheck and cloudCheck use generateContentStream so the
+//   UI can show progress (chars received) while the model is generating.
+//   The final JSON is read from streamResult.response (the aggregated result) —
+//   not from the incremental chunks, which may contain partial JSON.
 
 import { onDeviceModel, cloudModel } from './models';
 import { getOnDeviceAvailability, initDeviceModel } from './availability';
@@ -37,56 +36,140 @@ function buildRequest(text) {
   };
 }
 
+// ── parseCheckResult ───────────────────────────────────────────────────────────
+
 /**
- * Parse a raw JSON string from the model into a typed result object.
- * Throws if the JSON is malformed or missing required fields.
- * Exported for use in TestRunner.
+ * Parse and normalise the raw JSON string returned by the model.
+ * Post-processing enforces two invariants:
+ *   1. safe verdict → category forced to 'none', redFlags forced to []
+ *   2. redFlags capped at 3 items (belt-and-suspenders; schema already limits to 3)
  *
  * @param {string} rawJson
- * @returns {{ verdict: string, confidence: string, category: string, redFlags: string[], summary: string, advice: string }}
+ * @returns {{ verdict, confidence, category, redFlags, summary, advice }}
  */
 export function parseCheckResult(rawJson) {
   let parsed;
   try {
-    // The model may wrap JSON in markdown code fences — strip them
+    // Strip any accidental markdown code fences
     const cleaned = rawJson.replace(/^```(?:json)?\n?|\n?```$/g, '').trim();
     parsed = JSON.parse(cleaned);
   } catch {
     throw new Error(`Model returned invalid JSON: ${rawJson.slice(0, 200)}`);
   }
+
   const required = ['verdict', 'confidence', 'category', 'redFlags', 'summary', 'advice'];
   for (const field of required) {
     if (parsed[field] === undefined) {
       throw new Error(`Model response missing field: ${field}`);
     }
   }
-  return {
-    verdict: parsed.verdict,
-    confidence: parsed.confidence,
-    category: parsed.category,
-    redFlags: Array.isArray(parsed.redFlags) ? parsed.redFlags : [],
-    summary: parsed.summary,
-    advice: parsed.advice,
-  };
+
+  let { verdict, confidence, category, redFlags, summary, advice } = parsed;
+
+  // Enforce: safe verdict must have category 'none' and no red flags
+  if (verdict === 'safe') {
+    category = 'none';
+    redFlags = [];
+  }
+
+  // Cap redFlags at 3 (matches schema maxItems; model may ignore it)
+  redFlags = Array.isArray(redFlags) ? redFlags.slice(0, 3) : [];
+
+  return { verdict, confidence, category, redFlags, summary, advice };
 }
 
-// ── Public API ─────────────────────────────────────────────────────────────────
+// ── Warm-up ────────────────────────────────────────────────────────────────────
 
 /**
- * Main entry point for the scam check flow.
+ * Best-effort warm-up: creates the Chrome session and loads the model into
+ * VRAM so the first real check doesn't pay that cold-start cost.
+ *
+ * Safe to call from useEffect (no user gesture needed) when availability is
+ * already 'available' — Chrome only requires a gesture when a download would
+ * be triggered, which 'available' rules out.
+ *
+ * Uses a plain string prompt with no schema to minimise warm-up time.
+ */
+export async function warmUpDeviceModel() {
+  const start = Date.now();
+  try {
+    await onDeviceModel.generateContent('hi');
+    console.log(`[ScamShield] On-device warm-up: ${Date.now() - start}ms`);
+  } catch (err) {
+    // Silent fail — first real check will still work (just slower).
+    console.log('[ScamShield] On-device warm-up skipped:', err?.message ?? String(err));
+  }
+}
+
+// ── Core check functions ───────────────────────────────────────────────────────
+
+/**
+ * Run on-device check using streaming for live progress updates.
+ * Assumes the model is already downloaded (availability === 'available').
+ * Also called directly by TestRunner (no onChunk needed there).
+ *
+ * @param {string} text - Raw message text
+ * @param {(totalChars: number) => void} [onChunk] - Called with cumulative chars received
+ */
+export async function onDeviceCheck(text, onChunk) {
+  const start = Date.now();
+  const streamResult = await onDeviceModel.generateContentStream(buildRequest(text));
+
+  let charsReceived = 0;
+  for await (const chunk of streamResult.stream) {
+    const chunkText = chunk.text(); // throws if model blocked — let it propagate
+    charsReceived += chunkText.length;
+    try { onChunk?.(charsReceived); } catch { /* ignore callback errors */ }
+  }
+
+  const raw = (await streamResult.response).text();
+  const result = parseCheckResult(raw);
+  return { ...result, source: 'on-device', durationMs: Date.now() - start };
+}
+
+/**
+ * Regex-mask then cloud-check using streaming for live progress updates.
+ * Only called after the user has explicitly consented (ConsentDialog).
+ *
+ * @param {string} text - Raw message text; will be masked before leaving device
+ * @param {(totalChars: number) => void} [onChunk]
+ */
+export async function cloudCheck(text, onChunk) {
+  const start = Date.now();
+  const masked = regexMask(text);
+  const streamResult = await cloudModel.generateContentStream(buildRequest(masked));
+
+  let charsReceived = 0;
+  for await (const chunk of streamResult.stream) {
+    const chunkText = chunk.text();
+    charsReceived += chunkText.length;
+    try { onChunk?.(charsReceived); } catch { /* ignore callback errors */ }
+  }
+
+  const raw = (await streamResult.response).text();
+  const result = parseCheckResult(raw);
+  return { ...result, source: 'cloud', maskedText: masked, durationMs: Date.now() - start };
+}
+
+// ── Public routing API ─────────────────────────────────────────────────────────
+
+/**
+ * Main entry point. Checks availability, then routes to on-device or returns
+ * a state token for the UI to handle.
  *
  * Returns one of:
  *   { verdict, confidence, category, redFlags, summary, advice, source, durationMs }
  *   { state: 'needs_download', availability }
  *   { state: 'needs_consent', availability }
  *
- * @param {string} text - Raw message text from the user
+ * @param {string} text
+ * @param {(totalChars: number) => void} [onChunk] - Forwarded to onDeviceCheck
  */
-export async function checkMessage(text) {
+export async function checkMessage(text, onChunk) {
   const availability = await getOnDeviceAvailability();
 
   if (availability === 'available') {
-    return onDeviceCheck(text);
+    return onDeviceCheck(text, onChunk);
   }
 
   if (availability === 'downloadable' || availability === 'downloading') {
@@ -98,55 +181,24 @@ export async function checkMessage(text) {
 }
 
 /**
- * Run on-device check directly (no routing, no availability check).
- * Assumes the model is already downloaded (availability === 'available').
- * Also used directly by the TestRunner to bypass the routing overhead.
+ * Download then check in one step.
+ * MUST be called from a user gesture (button click).
  *
- * @param {string} text - Raw message text
+ * @param {string} text
+ * @param {(progress: number) => void} [onDownloadProgress] - 0.0 → 1.0
+ * @param {(totalChars: number) => void} [onChunk]
  */
-export async function onDeviceCheck(text) {
-  const start = Date.now();
-  const response = await onDeviceModel.generateContent(buildRequest(text));
-  const raw = response.response.text();
-  const result = parseCheckResult(raw);
-  return { ...result, source: 'on-device', durationMs: Date.now() - start };
+export async function downloadAndCheck(text, onDownloadProgress, onChunk) {
+  await initDeviceModel(onDeviceModel, onDownloadProgress);
+  return onDeviceCheck(text, onChunk);
 }
 
 /**
- * Download the on-device model then immediately run a check.
- * MUST be called from a user gesture (button click) — Chrome requires it
- * for `initializeDeviceModel()`.
- *
- * @param {string} text - Raw message text
- * @param {(progress: number) => void} [onProgress] - 0.0 → 1.0
- */
-export async function downloadAndCheck(text, onProgress) {
-  await initDeviceModel(onDeviceModel, onProgress);
-  return onDeviceCheck(text);
-}
-
-/**
- * Pre-download the model without running a check (for the ModelStatus
- * "Download model" button which should not require a pending message).
+ * Pre-download without running a check (for the ModelStatus "Download" button).
  * MUST be called from a user gesture.
  *
- * @param {(progress: number) => void} [onProgress] - 0.0 → 1.0
+ * @param {(progress: number) => void} [onProgress]
  */
 export async function preloadDeviceModel(onProgress) {
   await initDeviceModel(onDeviceModel, onProgress);
-}
-
-/**
- * Regex-mask the text then run the check on the cloud.
- * Only called after the user has explicitly given consent (ConsentDialog).
- *
- * @param {string} text - Raw message text; will be masked before leaving device
- */
-export async function cloudCheck(text) {
-  const start = Date.now();
-  const masked = regexMask(text);
-  const response = await cloudModel.generateContent(buildRequest(masked));
-  const raw = response.response.text();
-  const result = parseCheckResult(raw);
-  return { ...result, source: 'cloud', maskedText: masked, durationMs: Date.now() - start };
 }

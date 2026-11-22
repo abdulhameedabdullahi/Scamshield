@@ -45,8 +45,8 @@ export const SCAM_RESULT_SCHEMA = Schema.object({
     }),
     redFlags: Schema.array({
       items: Schema.string({ description: 'A short phrase describing one red flag' }),
-      maxItems: 5,
-      description: 'Specific red flags found in the message (empty for safe messages)',
+      maxItems: 3,
+      description: 'Up to 3 red flags found in the message (empty array for safe messages)',
     }),
     summary: Schema.string({
       description: 'One short sentence explaining the verdict',

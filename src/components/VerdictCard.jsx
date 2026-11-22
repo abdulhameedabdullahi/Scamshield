@@ -5,6 +5,8 @@
 //   suspicious → amber
 //   safe       → green
 
+import { REPORTING_TIPS } from '../config';
+
 const VERDICT_CONFIG = {
   scam: {
     label: 'SCAM',
@@ -33,18 +35,17 @@ const VERDICT_CONFIG = {
 };
 
 const CATEGORY_LABELS = {
-  fake_bank_alert:         'Fake Bank Alert',
+  fake_bank_alert:          'Fake Bank Alert',
   account_block_or_bvn_nin: 'Account / BVN / NIN Block',
-  otp_pin_request:         'OTP / PIN Request',
-  job_or_loan_upfront_fee: 'Job / Loan with Upfront Fee',
-  prize_or_lottery:        'Prize / Lottery',
-  impersonation:           'Impersonation',
-  investment_scheme:       'Investment Scheme',
-  wrong_transfer_refund:   'Wrong Transfer Refund',
-  romance:                 'Romance Scam',
-  phishing_link:           'Phishing Link',
-  other:                   'Other',
-  none:                    null,
+  otp_pin_request:          'OTP / PIN Request',
+  job_or_loan_upfront_fee:  'Job / Loan with Upfront Fee',
+  prize_or_lottery:         'Prize / Lottery',
+  impersonation:            'Impersonation',
+  investment_scheme:        'Investment Scheme',
+  wrong_transfer_refund:    'Wrong Transfer Refund',
+  romance:                  'Romance Scam',
+  phishing_link:            'Phishing Link',
+  other:                    'Other',
 };
 
 const CONFIDENCE_LABELS = {
@@ -53,24 +54,39 @@ const CONFIDENCE_LABELS = {
   low:    'Low confidence',
 };
 
+/**
+ * Derive the category display label shown in the header.
+ * - safe + none → "Legitimate message"
+ * - scam/suspicious + none → "Other suspicious message"
+ * - scam/suspicious + known category → that category's label
+ */
+function getCategoryLabel(verdict, category) {
+  if (verdict === 'safe') {
+    return 'Legitimate message';
+  }
+  if (category === 'none') {
+    return 'Other suspicious message';
+  }
+  return CATEGORY_LABELS[category] ?? category;
+}
+
 export default function VerdictCard({ result }) {
   const cfg = VERDICT_CONFIG[result.verdict] ?? VERDICT_CONFIG.suspicious;
-  const categoryLabel = CATEGORY_LABELS[result.category];
+  const categoryLabel = getCategoryLabel(result.verdict, result.category);
   const confidenceLabel = CONFIDENCE_LABELS[result.confidence] ?? result.confidence;
   const isCloud = result.source === 'cloud';
+  const isSafe = result.verdict === 'safe';
 
   return (
     <div style={{ ...styles.card, background: cfg.bg, border: `1px solid ${cfg.border}` }}>
-      {/* Header row */}
+      {/* Header */}
       <div style={{ ...styles.header, background: cfg.headBg }}>
         <span style={{ ...styles.verdictLabel, color: cfg.headText }}>
           {cfg.label}
         </span>
-        {categoryLabel && (
-          <span style={{ ...styles.category, color: cfg.headText }}>
-            {categoryLabel}
-          </span>
-        )}
+        <span style={{ ...styles.category, color: cfg.headText }}>
+          {categoryLabel}
+        </span>
       </div>
 
       {/* Body */}
@@ -79,7 +95,7 @@ export default function VerdictCard({ result }) {
         <p style={styles.summary}>{result.summary}</p>
         <p style={styles.confidence}>{confidenceLabel}</p>
 
-        {/* Red flags */}
+        {/* Red flags — only shown for scam/suspicious */}
         {result.redFlags && result.redFlags.length > 0 && (
           <div style={styles.section}>
             <div style={styles.sectionTitle}>Red flags</div>
@@ -91,11 +107,23 @@ export default function VerdictCard({ result }) {
           </div>
         )}
 
-        {/* Advice */}
+        {/* AI-generated advice */}
         <div style={styles.section}>
-          <div style={styles.sectionTitle}>What to do</div>
+          <div style={styles.sectionTitle}>{isSafe ? 'Note' : 'Advice'}</div>
           <p style={styles.advice}>{result.advice}</p>
         </div>
+
+        {/* Static reporting tips — only for scam/suspicious */}
+        {!isSafe && (
+          <div style={{ ...styles.section, ...styles.reportingBox }}>
+            <div style={{ ...styles.sectionTitle, color: cfg.bodyText }}>What you can do</div>
+            <ul style={styles.reportingList}>
+              {REPORTING_TIPS.map((tip, i) => (
+                <li key={i} style={styles.reportingItem}>{tip}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Footer: source + timing */}
         <div style={styles.footer}>
@@ -178,6 +206,21 @@ const styles = {
     margin: 0,
     fontSize: '0.875rem',
     lineHeight: 1.6,
+  },
+  reportingBox: {
+    background: 'rgba(0,0,0,0.04)',
+    borderRadius: 7,
+    padding: '10px 12px',
+    marginBottom: 14,
+  },
+  reportingList: {
+    margin: 0,
+    paddingLeft: 18,
+  },
+  reportingItem: {
+    fontSize: '0.82rem',
+    lineHeight: 1.7,
+    marginBottom: 2,
   },
   footer: {
     display: 'flex',

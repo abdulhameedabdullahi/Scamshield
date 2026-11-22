@@ -191,7 +191,7 @@ const status = await getOnDeviceAvailability();
 - **Removed `preferOnDeviceModel`** — PREFER_ON_DEVICE silently exposes raw text to the cloud when Nano is unavailable. Replaced with explicit routing in `checkMessage.js` that returns `{ state: 'needs_download' }` or `{ state: 'needs_consent' }` to let the UI handle both cases with the user's knowledge. See routing design above.
 - **Extracted `regexMask.js`** — moved the PII regex from `maskMessage.js` into its own file so it can be imported by `checkMessage.js` (for the cloud path) independently of the AI masking module.
 - **Structured output schema** — `SCAM_RESULT_SCHEMA` uses `Schema.object/enumString/array/string` from `firebase/ai`. On-device: the Firebase SDK bridges `generationConfig.responseSchema` → Chrome's `responseConstraint`. Cloud: standard Gemini structured output.
-- **Verdict schema fields**: `verdict` (scam/suspicious/safe), `confidence` (low/medium/high), `category` (12 enum values), `redFlags` (array ≤5), `summary` (string), `advice` (string).
+- **Verdict schema fields**: `verdict` (scam/suspicious/safe), `confidence` (low/medium/high), `category` (12 enum values), `redFlags` (array ≤3), `summary` (string), `advice` (string).
 - **Full scam check UI** — `ModelStatus`, `MessageInput`, `VerdictCard`, `ConsentDialog` components. `DevTestPanel` + `TestRunner` moved behind "Developer tools" collapsible toggle.
 - **Developer test harness** — 14 synthetic test messages (9 scam categories + 5 legit) in `dev/testMessages.js`; `TestRunner.jsx` runs them through `onDeviceCheck()` and shows accuracy %.
 - **`preloadDeviceModel(onProgress)`** exported from `checkMessage.js` — lets the ModelStatus "Download model" button pre-download without requiring a pending message.
@@ -208,7 +208,7 @@ const response = await model.generateContent({
 const json = response.response.text();  // Always a JSON string when responseMimeType is set
 ```
 
-### Routing return values from checkMessage(text)
+### Routing return values from checkMessage(text, onChunk?)
 ```js
 // On-device path (availability === 'available')
 { verdict, confidence, category, redFlags, summary, advice, source: 'on-device', durationMs }
@@ -222,3 +222,40 @@ const json = response.response.text();  // Always a JSON string when responseMim
 // Cloud path after consent (from cloudCheck())
 { verdict, confidence, category, redFlags, summary, advice, source: 'cloud', maskedText, durationMs }
 ```
+
+---
+
+## Decisions made in session 4 (bug fixes + speed)
+
+- **Issue 1 — category contradicts verdict**: `parseCheckResult` now forces `category = 'none'` and `redFlags = []` when `verdict === 'safe'`. VerdictCard shows "Legitimate message" for safe results and "Other suspicious message" when scam/suspicious with `category === 'none'`.
+- **Issue 2 — no org-specific advice**: Prompt updated to explicitly prohibit naming organisations or stating their policies. advice must use only general guidance like "Contact your bank using the number on the back of your card".
+- **Issue 3 — static reporting tips**: Removed reporting instructions from AI advice entirely. Added `REPORTING_TIPS` array to `src/config.js`. VerdictCard renders a static "What you can do" section (only for scam/suspicious) from this constant. No phone numbers or URLs hard-coded — TODO comment marks where official Nigerian agency links will be added once verified.
+- **Issue 4 — speed improvements**:
+  - Prompt trimmed ~37% (350 words → 220 words) — faster prefill.
+  - `redFlags` capped at 3 in schema (`maxItems: 3`) and prompt — less output to generate.
+  - Both `onDeviceCheck` and `cloudCheck` switched from `generateContent` to `generateContentStream` — UI shows live char count and elapsed seconds while generating.
+  - `warmUpDeviceModel()` added to `checkMessage.js` — fires from `useEffect` in App.jsx when `availability === 'available'` (no gesture needed since no download is triggered); creates the Chrome session early so the first real check is not cold-started. Expected to cut first-check time by 5-10 s.
+  - Live elapsed counter (`0.1s` ticks) shown while checking in App.jsx.
+  - TestRunner now has a warm-up step and reports warm-up time + first-run time + average of runs 2-14 separately.
+
+### Streaming call signature (verified against @firebase/ai types)
+```js
+// GenerativeModel.generateContentStream returns Promise<GenerateContentStreamResult>
+// GenerateContentStreamResult: { stream: AsyncGenerator<EnhancedGenerateContentResponse>, response: Promise<...> }
+// ChromeAdapterImpl also implements generateContentStream — works on-device with responseSchema.
+
+const streamResult = await model.generateContentStream(request);
+for await (const chunk of streamResult.stream) {
+  const text = chunk.text(); // partial JSON — only use for char count / progress
+}
+const finalText = (await streamResult.response).text(); // complete JSON — parse this
+```
+
+### Expected speed improvements
+| Phase | Before | After (estimate) |
+|-------|--------|-----------------|
+| First check (cold) | ~16 s | ~6-10 s (warm-up absorbs session creation on page load) |
+| Subsequent checks (warm) | ~8-12 s | ~5-8 s (shorter prompt + less output) |
+| Time-to-first-token (perceived) | silent wait | visible counter starts immediately |
+
+**How to measure**: Use TestRunner. Run once — first-run time is the cold-start (minus warm-up). Avg of runs 2-14 is steady-state. Compare before/after a reload (without navigating away) to see warm-up benefit.
