@@ -19,11 +19,18 @@ using Firebase AI Logic **hybrid inference**.
 
 | Step | Where | Inference mode | Notes |
 |------|-------|---------------|-------|
-| 1. Quick scam check | On-device (Gemini Nano) | `PREFER_ON_DEVICE` | Returns structured JSON: `{ verdict, confidence, redFlags, advice }`. Falls back to cloud if Nano unavailable. |
-| 2. Mask personal details | On-device ONLY + regex | `ONLY_ON_DEVICE` | Names, account numbers, phone, emails, BVN/NIN. **Must NEVER fall back to cloud.** |
-| 3. "Investigate deeper" | Cloud | `ONLY_IN_CLOUD` + Google Search grounding | Multi-turn chat. Uses masked text only. |
-| 4. Non-English messages | Cloud | `ONLY_IN_CLOUD` | Nano officially supports en/es/ja/de/fr only |
+| 1. Quick scam check | On-device (Gemini Nano) | `ONLY_ON_DEVICE` | Explicit routing — user is always told where their text goes. Returns structured JSON: `{ verdict, confidence, category, redFlags, summary, advice }`. |
+| 2. Cloud scam check (consent-gated) | Cloud | `ONLY_IN_CLOUD` | Only after user consent. regexMask() runs first — raw PII never leaves device. |
+| 3. Mask personal details | On-device ONLY + regex | `ONLY_ON_DEVICE` | Names, account numbers, phone, emails, BVN/NIN. **Must NEVER fall back to cloud.** |
+| 4. "Investigate deeper" | Cloud | `ONLY_IN_CLOUD` + Google Search grounding | Multi-turn chat. Uses masked text only. (🚧 not yet built) |
 | 5. No-Nano devices | Regex mask + explicit consent | `ONLY_IN_CLOUD` | Graceful degradation |
+
+**WHY `PREFER_ON_DEVICE` WAS REMOVED (session 3):**
+`PREFER_ON_DEVICE` silently falls back to cloud when Gemini Nano is unavailable, sending raw
+(unmasked) text to the cloud without the user's knowledge. This breaks the app's privacy promise.
+`checkMessage.js` now implements explicit routing: it checks `LanguageModel.availability()` and
+either runs on-device, prompts the user to download the model, or shows a consent dialog before
+any cloud call. The user always knows where their text goes.
 
 ---
 
@@ -65,23 +72,32 @@ using Firebase AI Logic **hybrid inference**.
 
 ```
 src/
-  firebase.js          ← Firebase app init + App Check + getAI → exports app, ai
-  config.js            ← CLOUD_MODEL, APP_NAME constants
+  firebase.js           ← Firebase app init + App Check + getAI → exports app, ai
+  config.js             ← CLOUD_MODEL, APP_NAME constants
   ai/
-    models.js          ← Creates & exports: onDeviceModel, preferOnDeviceModel, cloudModel
-    availability.js    ← getOnDeviceAvailability(), initDeviceModel() helpers
-    prompts.js         ← Placeholder prompt constants (TODO)
-    schemas.js         ← Placeholder JSON schema (TODO)
-    checkMessage.js    ← Stub: checkMessage(text) — PREFER_ON_DEVICE (TODO)
-    maskMessage.js     ← Stub + regexMask() — ONLY_ON_DEVICE (TODO for AI masking)
-    investigate.js     ← Stub: investigate(maskedText) — ONLY_IN_CLOUD (TODO)
+    models.js           ← Creates & exports: onDeviceModel, cloudModel (2 models only — no PREFER_ON_DEVICE)
+    availability.js     ← getOnDeviceAvailability(), initDeviceModel() helpers
+    regexMask.js        ← Standalone PII regex masker: regexMask(text) — no AI, runs synchronously
+    maskMessage.js      ← maskMessage(text) — imports from regexMask.js; NEVER falls back to cloud
+    prompts.js          ← buildScamCheckPrompt(messageText, scamTrends?) — single-string prompt builder
+    schemas.js          ← SCAM_RESULT_SCHEMA (Schema.object), SCAM_CHECK_GENERATION_CONFIG
+    checkMessage.js     ← Explicit routing: checkMessage(), onDeviceCheck(), cloudCheck(),
+                           downloadAndCheck(), preloadDeviceModel(), parseCheckResult()
+    investigate.js      ← Stub: investigate(maskedText) — ONLY_IN_CLOUD (TODO)
   services/
-    reports.js         ← Stub: Firestore community reports (TODO)
+    reports.js          ← Stub: Firestore community reports (TODO)
   components/
-    DevTestPanel.jsx   ← Dev test UI: availability status + on-device/cloud buttons
-  App.jsx              ← Root: "ScamShield" header + DevTestPanel
-  main.jsx             ← Vite entry point (unchanged from template)
-  index.css            ← Global styles (cleaned up from Vite template)
+    ModelStatus.jsx     ← On-device availability banner + pre-download button with progress bar
+    MessageInput.jsx    ← Textarea, Check button, Clear button, char counter (2000 max)
+    VerdictCard.jsx     ← Colour-coded result card (red/amber/green), source badge, masked preview
+    ConsentDialog.jsx   ← Inline consent UI for the cloud check path
+    DevTestPanel.jsx    ← Dev test UI: availability status + on-device/cloud hello-world buttons
+  dev/
+    testMessages.js     ← 14 synthetic test messages (9 scams, 5 legit) with expected verdicts
+    TestRunner.jsx      ← Batch test runner table: expected vs actual, accuracy %, timing
+  App.jsx               ← Full app UI; DevTestPanel + TestRunner behind "Developer tools" toggle
+  main.jsx              ← Vite entry point (unchanged from template)
+  index.css             ← Global styles (cleaned up from Vite template)
 ```
 
 ---
@@ -105,22 +121,17 @@ const ON_DEVICE_PARAMS = {
 };
 ```
 
-### Three model instances (src/ai/models.js)
+### Two model instances (src/ai/models.js)
+`preferOnDeviceModel` was removed in session 3. See routing design above.
+
 ```js
-// ONLY_ON_DEVICE — strict, for PII masking
+// ONLY_ON_DEVICE — for scam check (on-device path) and PII masking
 export const onDeviceModel = getGenerativeModel(ai, {
   mode: InferenceMode.ONLY_ON_DEVICE,
   onDeviceParams: ON_DEVICE_PARAMS,
 });
 
-// PREFER_ON_DEVICE — tries Nano first, falls back to cloud
-export const preferOnDeviceModel = getGenerativeModel(ai, {
-  mode: InferenceMode.PREFER_ON_DEVICE,
-  onDeviceParams: ON_DEVICE_PARAMS,
-  inCloudParams: { model: CLOUD_MODEL },
-});
-
-// ONLY_IN_CLOUD — investigation + chat
+// ONLY_IN_CLOUD — for the consent-gated cloud scam check and future deep investigation
 export const cloudModel = getGenerativeModel(ai, {
   mode: InferenceMode.ONLY_IN_CLOUD,
   inCloudParams: { model: CLOUD_MODEL },
@@ -172,3 +183,42 @@ const status = await getOnDeviceAvailability();
 - Added `preferOnDeviceModel` (PREFER_ON_DEVICE) for the scam check — the previous `deviceModel` was ONLY_ON_DEVICE which would error if Nano was unavailable.
 - `CLOUD_MODEL` constant in `src/config.js`; currently `'gemini-3.5-flash-lite'` (confirmed working Nov 2026; `gemini-2.0-flash-lite` was retired).
 - Added `regexMask()` as a PII safety net in `maskMessage.js` — currently the only masking in use until the AI masking prompt is written.
+
+---
+
+## Decisions made in session 3
+
+- **Removed `preferOnDeviceModel`** — PREFER_ON_DEVICE silently exposes raw text to the cloud when Nano is unavailable. Replaced with explicit routing in `checkMessage.js` that returns `{ state: 'needs_download' }` or `{ state: 'needs_consent' }` to let the UI handle both cases with the user's knowledge. See routing design above.
+- **Extracted `regexMask.js`** — moved the PII regex from `maskMessage.js` into its own file so it can be imported by `checkMessage.js` (for the cloud path) independently of the AI masking module.
+- **Structured output schema** — `SCAM_RESULT_SCHEMA` uses `Schema.object/enumString/array/string` from `firebase/ai`. On-device: the Firebase SDK bridges `generationConfig.responseSchema` → Chrome's `responseConstraint`. Cloud: standard Gemini structured output.
+- **Verdict schema fields**: `verdict` (scam/suspicious/safe), `confidence` (low/medium/high), `category` (12 enum values), `redFlags` (array ≤5), `summary` (string), `advice` (string).
+- **Full scam check UI** — `ModelStatus`, `MessageInput`, `VerdictCard`, `ConsentDialog` components. `DevTestPanel` + `TestRunner` moved behind "Developer tools" collapsible toggle.
+- **Developer test harness** — 14 synthetic test messages (9 scam categories + 5 legit) in `dev/testMessages.js`; `TestRunner.jsx` runs them through `onDeviceCheck()` and shows accuracy %.
+- **`preloadDeviceModel(onProgress)`** exported from `checkMessage.js` — lets the ModelStatus "Download model" button pre-download without requiring a pending message.
+
+### Structured output call signature (verified against @firebase/ai types)
+```js
+const response = await model.generateContent({
+  contents: [{ role: 'user', parts: [{ text: prompt }] }],
+  generationConfig: {
+    responseMimeType: 'application/json',
+    responseSchema: SCAM_RESULT_SCHEMA,  // Schema instance from Schema.object(...)
+  },
+});
+const json = response.response.text();  // Always a JSON string when responseMimeType is set
+```
+
+### Routing return values from checkMessage(text)
+```js
+// On-device path (availability === 'available')
+{ verdict, confidence, category, redFlags, summary, advice, source: 'on-device', durationMs }
+
+// Needs download (availability === 'downloadable' | 'downloading')
+{ state: 'needs_download', availability }
+
+// Needs consent (availability === 'unavailable' | 'unsupported')
+{ state: 'needs_consent', availability }
+
+// Cloud path after consent (from cloudCheck())
+{ verdict, confidence, category, redFlags, summary, advice, source: 'cloud', maskedText, durationMs }
+```

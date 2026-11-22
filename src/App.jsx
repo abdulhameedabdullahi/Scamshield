@@ -1,31 +1,328 @@
-import DevTestPanel from './components/DevTestPanel';
+import { useState, useEffect, useCallback } from 'react';
 import { APP_NAME } from './config';
+import { getOnDeviceAvailability } from './ai/availability';
+import { checkMessage, downloadAndCheck, cloudCheck, preloadDeviceModel } from './ai/checkMessage';
+import ModelStatus from './components/ModelStatus';
+import MessageInput from './components/MessageInput';
+import VerdictCard from './components/VerdictCard';
+import ConsentDialog from './components/ConsentDialog';
+import DevTestPanel from './components/DevTestPanel';
+import TestRunner from './dev/TestRunner';
+
+// App-level state machine:
+//   idle          → waiting for user to type and click Check
+//   checking      → checkMessage() in progress
+//   needs_download → model not downloaded; waiting for user gesture
+//   downloading   → preloadDeviceModel or downloadAndCheck in progress
+//   needs_consent → on-device unavailable; waiting for consent to cloud check
+//   done          → result is ready
+//   error         → an error occurred
 
 export default function App() {
+  const [appState, setAppState] = useState('idle');
+  const [text, setText] = useState('');
+  const [result, setResult] = useState(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [availability, setAvailability] = useState(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [devOpen, setDevOpen] = useState(false);
+
+  useEffect(() => {
+    getOnDeviceAvailability().then(setAvailability);
+  }, []);
+
+  function handleTextChange(newText) {
+    setText(newText);
+    // Clear results when the user edits the message after a check
+    if (appState === 'done' || appState === 'error' || appState === 'needs_consent' || appState === 'needs_download') {
+      setAppState('idle');
+      setResult(null);
+      setErrorMsg('');
+    }
+  }
+
+  function handleClear() {
+    setText('');
+    setAppState('idle');
+    setResult(null);
+    setErrorMsg('');
+  }
+
+  // ── Main check entry point ────────────────────────────────────────────────
+
+  async function handleCheck() {
+    if (!text.trim()) return;
+    setAppState('checking');
+    setResult(null);
+    setErrorMsg('');
+
+    try {
+      const outcome = await checkMessage(text);
+
+      if (outcome.state === 'needs_download') {
+        setAvailability(outcome.availability);
+        setAppState('needs_download');
+      } else if (outcome.state === 'needs_consent') {
+        setAvailability(outcome.availability);
+        setAppState('needs_consent');
+      } else {
+        // Got a real result
+        setResult(outcome);
+        setAvailability(outcome.source === 'on-device' ? 'available' : availability);
+        setAppState('done');
+      }
+    } catch (err) {
+      setErrorMsg(err?.message ?? 'An unexpected error occurred. Please try again.');
+      setAppState('error');
+    }
+  }
+
+  // ── Download & check (must be a click handler → user gesture) ────────────
+
+  const handleDownloadAndCheck = useCallback(async () => {
+    setAppState('downloading');
+    setDownloadProgress(0);
+    try {
+      const outcome = await downloadAndCheck(text, (p) => {
+        setDownloadProgress(Math.round(p * 100));
+      });
+      setResult(outcome);
+      setAvailability('available');
+      setAppState('done');
+    } catch (err) {
+      setErrorMsg(err?.message ?? 'Download failed. Please try again.');
+      setAppState('error');
+    }
+  }, [text]);
+
+  // ── Pre-download without a pending check (from ModelStatus button) ────────
+
+  const handlePreload = useCallback(async () => {
+    setAppState('downloading');
+    setDownloadProgress(0);
+    try {
+      await preloadDeviceModel((p) => {
+        setDownloadProgress(Math.round(p * 100));
+      });
+      setAvailability('available');
+      setAppState('idle');
+    } catch (err) {
+      setErrorMsg(err?.message ?? 'Download failed. Please try again.');
+      setAppState('error');
+    }
+  }, []);
+
+  // ── Cloud consent path ────────────────────────────────────────────────────
+
+  async function handleConsent() {
+    setAppState('checking');
+    try {
+      const outcome = await cloudCheck(text);
+      setResult(outcome);
+      setAppState('done');
+    } catch (err) {
+      setErrorMsg(err?.message ?? 'Cloud check failed. Please try again.');
+      setAppState('error');
+    }
+  }
+
+  function handleDecline() {
+    setAppState('idle');
+  }
+
+  // ── Derived state ─────────────────────────────────────────────────────────
+
+  const isChecking = appState === 'checking';
+  const isDownloading = appState === 'downloading';
+
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}>{APP_NAME}</h1>
-      <p style={styles.subtitle}>
-        Firebase AI Logic hybrid inference — development test panel
-      </p>
-      <DevTestPanel />
+      {/* Header */}
+      <header style={styles.header}>
+        <h1 style={styles.title}>{APP_NAME}</h1>
+        <p style={styles.subtitle}>
+          Check if an SMS, WhatsApp or email message is a scam — privately, on your device.
+        </p>
+      </header>
+
+      {/* On-device AI status banner */}
+      <ModelStatus
+        availability={isDownloading ? 'downloading' : availability}
+        isDownloading={isDownloading}
+        downloadProgress={downloadProgress}
+        onDownloadRequest={handlePreload}
+      />
+
+      {/* Consent gate — shown when on-device is unavailable */}
+      {appState === 'needs_consent' && (
+        <ConsentDialog
+          onConsent={handleConsent}
+          onDecline={handleDecline}
+        />
+      )}
+
+      {/* Message input */}
+      <MessageInput
+        value={text}
+        onChange={handleTextChange}
+        onCheck={handleCheck}
+        onClear={handleClear}
+        disabled={isChecking || isDownloading}
+      />
+
+      {/* Download-and-check prompt — shown after routing returns needs_download */}
+      {appState === 'needs_download' && (
+        <div style={styles.downloadPrompt}>
+          <p style={styles.downloadPromptText}>
+            The private AI model needs to be downloaded before checking your message.
+            This is a one-time download.
+          </p>
+          {isDownloading && (
+            <div style={styles.progressRow}>
+              <div style={styles.progressTrack}>
+                <div style={{ ...styles.progressFill, width: `${downloadProgress}%` }} />
+              </div>
+              <span style={styles.progressLabel}>{downloadProgress}%</span>
+            </div>
+          )}
+          {!isDownloading && (
+            <button style={styles.dlBtn} onClick={handleDownloadAndCheck} type="button">
+              Download and check
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Error message */}
+      {appState === 'error' && errorMsg && (
+        <div style={styles.errorBox}>
+          <strong>Error: </strong>{errorMsg}
+        </div>
+      )}
+
+      {/* Result */}
+      {appState === 'done' && result && (
+        <div style={styles.resultWrap}>
+          <VerdictCard result={result} />
+        </div>
+      )}
+
+      {/* Developer tools — collapsed by default */}
+      <div style={styles.devSection}>
+        <button
+          style={styles.devToggle}
+          onClick={() => setDevOpen((o) => !o)}
+          type="button"
+          aria-expanded={devOpen}
+        >
+          {devOpen ? '▾' : '▸'} Developer tools
+        </button>
+        {devOpen && (
+          <div style={styles.devContent}>
+            <DevTestPanel />
+            <TestRunner />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 const styles = {
   container: {
-    maxWidth: 720,
+    maxWidth: 680,
     margin: '40px auto',
-    padding: '0 20px',
+    padding: '0 20px 60px',
+  },
+  header: {
+    marginBottom: 24,
   },
   title: {
-    fontSize: '2rem',
-    marginBottom: 4,
+    fontSize: '1.75rem',
+    marginBottom: 6,
   },
   subtitle: {
     color: '#6b7280',
     fontSize: '0.95rem',
-    marginBottom: 0,
+    margin: 0,
+    lineHeight: 1.5,
+  },
+  downloadPrompt: {
+    background: '#eff6ff',
+    border: '1px solid #bfdbfe',
+    borderRadius: 8,
+    padding: '14px 16px',
+    marginTop: 14,
+  },
+  downloadPromptText: {
+    margin: '0 0 12px',
+    fontSize: '0.875rem',
+    color: '#1e3a8a',
+    lineHeight: 1.5,
+  },
+  progressRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+  },
+  progressTrack: {
+    flex: 1,
+    height: 8,
+    background: '#bfdbfe',
+    borderRadius: 99,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    background: '#1d4ed8',
+    borderRadius: 99,
+    transition: 'width 0.3s ease',
+  },
+  progressLabel: {
+    fontSize: '0.82rem',
+    color: '#1e3a8a',
+    minWidth: 36,
+    textAlign: 'right',
+  },
+  dlBtn: {
+    padding: '8px 18px',
+    fontSize: '0.875rem',
+    fontWeight: 600,
+    background: '#1d4ed8',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 6,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  errorBox: {
+    background: '#fef2f2',
+    border: '1px solid #fca5a5',
+    borderRadius: 8,
+    padding: '12px 16px',
+    marginTop: 14,
+    fontSize: '0.875rem',
+    color: '#991b1b',
+    lineHeight: 1.5,
+  },
+  resultWrap: {
+    marginTop: 20,
+  },
+  devSection: {
+    marginTop: 48,
+    borderTop: '1px solid #e5e7eb',
+    paddingTop: 20,
+  },
+  devToggle: {
+    background: 'none',
+    border: 'none',
+    color: '#9ca3af',
+    fontSize: '0.875rem',
+    cursor: 'pointer',
+    padding: 0,
+    fontFamily: 'inherit',
+  },
+  devContent: {
+    marginTop: 8,
   },
 };

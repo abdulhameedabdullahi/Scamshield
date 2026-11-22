@@ -1,0 +1,228 @@
+// VerdictCard — displays the structured result from checkMessage().
+//
+// Colour scheme:
+//   scam       → red
+//   suspicious → amber
+//   safe       → green
+
+const VERDICT_CONFIG = {
+  scam: {
+    label: 'SCAM',
+    bg: '#fef2f2',
+    border: '#fca5a5',
+    headBg: '#dc2626',
+    headText: '#fff',
+    bodyText: '#7f1d1d',
+  },
+  suspicious: {
+    label: 'SUSPICIOUS',
+    bg: '#fffbeb',
+    border: '#fcd34d',
+    headBg: '#d97706',
+    headText: '#fff',
+    bodyText: '#78350f',
+  },
+  safe: {
+    label: 'SAFE',
+    bg: '#f0fdf4',
+    border: '#86efac',
+    headBg: '#16a34a',
+    headText: '#fff',
+    bodyText: '#14532d',
+  },
+};
+
+const CATEGORY_LABELS = {
+  fake_bank_alert:         'Fake Bank Alert',
+  account_block_or_bvn_nin: 'Account / BVN / NIN Block',
+  otp_pin_request:         'OTP / PIN Request',
+  job_or_loan_upfront_fee: 'Job / Loan with Upfront Fee',
+  prize_or_lottery:        'Prize / Lottery',
+  impersonation:           'Impersonation',
+  investment_scheme:       'Investment Scheme',
+  wrong_transfer_refund:   'Wrong Transfer Refund',
+  romance:                 'Romance Scam',
+  phishing_link:           'Phishing Link',
+  other:                   'Other',
+  none:                    null,
+};
+
+const CONFIDENCE_LABELS = {
+  high:   'High confidence',
+  medium: 'Medium confidence',
+  low:    'Low confidence',
+};
+
+export default function VerdictCard({ result }) {
+  const cfg = VERDICT_CONFIG[result.verdict] ?? VERDICT_CONFIG.suspicious;
+  const categoryLabel = CATEGORY_LABELS[result.category];
+  const confidenceLabel = CONFIDENCE_LABELS[result.confidence] ?? result.confidence;
+  const isCloud = result.source === 'cloud';
+
+  return (
+    <div style={{ ...styles.card, background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+      {/* Header row */}
+      <div style={{ ...styles.header, background: cfg.headBg }}>
+        <span style={{ ...styles.verdictLabel, color: cfg.headText }}>
+          {cfg.label}
+        </span>
+        {categoryLabel && (
+          <span style={{ ...styles.category, color: cfg.headText }}>
+            {categoryLabel}
+          </span>
+        )}
+      </div>
+
+      {/* Body */}
+      <div style={{ ...styles.body, color: cfg.bodyText }}>
+        {/* Summary + confidence */}
+        <p style={styles.summary}>{result.summary}</p>
+        <p style={styles.confidence}>{confidenceLabel}</p>
+
+        {/* Red flags */}
+        {result.redFlags && result.redFlags.length > 0 && (
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>Red flags</div>
+            <ul style={styles.flagList}>
+              {result.redFlags.map((flag, i) => (
+                <li key={i} style={styles.flagItem}>{flag}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Advice */}
+        <div style={styles.section}>
+          <div style={styles.sectionTitle}>What to do</div>
+          <p style={styles.advice}>{result.advice}</p>
+        </div>
+
+        {/* Footer: source + timing */}
+        <div style={styles.footer}>
+          <span style={{ ...styles.sourceBadge, ...(isCloud ? styles.sourceBadgeCloud : styles.sourceBadgeDevice) }}>
+            {isCloud ? 'Cloud check (text was masked)' : 'Private (checked on-device)'}
+          </span>
+          {result.durationMs != null && (
+            <span style={styles.timing}>{result.durationMs.toLocaleString()} ms</span>
+          )}
+        </div>
+
+        {/* Show masked text preview for cloud checks */}
+        {isCloud && result.maskedText && (
+          <details style={styles.maskedDetails}>
+            <summary style={styles.maskedSummary}>View what was sent to the cloud</summary>
+            <pre style={styles.maskedText}>{result.maskedText}</pre>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  card: {
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '10px 16px',
+  },
+  verdictLabel: {
+    fontSize: '0.9rem',
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+  },
+  category: {
+    fontSize: '0.82rem',
+    fontWeight: 500,
+    opacity: 0.9,
+  },
+  body: {
+    padding: '16px 16px 12px',
+  },
+  summary: {
+    margin: '0 0 4px',
+    fontSize: '0.95rem',
+    fontWeight: 500,
+    lineHeight: 1.5,
+  },
+  confidence: {
+    margin: '0 0 16px',
+    fontSize: '0.82rem',
+    opacity: 0.75,
+  },
+  section: {
+    marginBottom: 14,
+  },
+  sectionTitle: {
+    fontSize: '0.8rem',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    marginBottom: 6,
+    opacity: 0.7,
+  },
+  flagList: {
+    margin: 0,
+    paddingLeft: 18,
+  },
+  flagItem: {
+    fontSize: '0.875rem',
+    lineHeight: 1.6,
+    marginBottom: 2,
+  },
+  advice: {
+    margin: 0,
+    fontSize: '0.875rem',
+    lineHeight: 1.6,
+  },
+  footer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 16,
+    paddingTop: 12,
+    borderTop: '1px solid rgba(0,0,0,0.08)',
+    flexWrap: 'wrap',
+  },
+  sourceBadge: {
+    fontSize: '0.78rem',
+    fontWeight: 600,
+    padding: '3px 10px',
+    borderRadius: 99,
+  },
+  sourceBadgeDevice: {
+    background: '#dcfce7',
+    color: '#166534',
+  },
+  sourceBadgeCloud: {
+    background: '#dbeafe',
+    color: '#1e40af',
+  },
+  timing: {
+    fontSize: '0.78rem',
+    opacity: 0.6,
+  },
+  maskedDetails: {
+    marginTop: 10,
+  },
+  maskedSummary: {
+    fontSize: '0.8rem',
+    cursor: 'pointer',
+    opacity: 0.7,
+  },
+  maskedText: {
+    marginTop: 6,
+    padding: '10px 12px',
+    background: 'rgba(0,0,0,0.06)',
+    borderRadius: 6,
+    fontSize: '0.8rem',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    fontFamily: 'var(--mono, monospace)',
+  },
+};

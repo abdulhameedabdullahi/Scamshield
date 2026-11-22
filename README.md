@@ -41,11 +41,12 @@ ScamShield is a **private, offline-first scam checker** that runs directly in Ch
 
 | Feature | Runs | Inference Mode | Why |
 |---|---|---|---|
-| Scam check (verdict, confidence, red flags) | On-device (Gemini Nano) | `PREFER_ON_DEVICE` | Fast, private, works offline. Falls back to cloud if Nano unavailable. |
+| Scam check — on-device path | On-device (Gemini Nano) | `ONLY_ON_DEVICE` | Private, offline-capable. Raw text never leaves device. |
+| Scam check — cloud path (consent-gated) | Cloud (Gemini) | `ONLY_IN_CLOUD` | Only after explicit user consent; phone/account numbers masked by regex first. |
 | Personal data masking | On-device only + regex safety net | `ONLY_ON_DEVICE` | Raw private text must **never** leave the device under any circumstances. |
-| Deep investigation + Google Search grounding | Cloud (Gemini) | `ONLY_IN_CLOUD` | Needs live web search and tools; only receives already-masked text. |
-| Follow-up chat | Cloud | `ONLY_IN_CLOUD` | Multi-turn chat is a cloud capability. |
-| Non-English messages (Pidgin, Hausa, Yoruba) | Cloud | `ONLY_IN_CLOUD` | Gemini Nano officially supports en/es/ja/de/fr; other languages route to cloud. |
+| Deep investigation + Google Search grounding | Cloud (Gemini) | `ONLY_IN_CLOUD` | Needs live web search and tools; only receives already-masked text. (🚧) |
+| Follow-up chat | Cloud | `ONLY_IN_CLOUD` | Multi-turn chat is a cloud capability. (🚧) |
+| Non-English messages (Pidgin, Hausa, Yoruba) | Cloud | `ONLY_IN_CLOUD` | Gemini Nano officially supports en/es/ja/de/fr; other languages route to cloud. (🚧) |
 | Devices without Gemini Nano | Regex masking + explicit user consent before cloud check | `ONLY_IN_CLOUD` | Graceful degradation with informed consent. |
 
 ---
@@ -86,19 +87,21 @@ flowchart TD
 ## Features
 
 - ✅ Firebase AI Logic hybrid inference wired up (on-device + cloud)
-- ✅ On-device inference with Gemini Nano (ONLY_ON_DEVICE and PREFER_ON_DEVICE models)
+- ✅ On-device inference with Gemini Nano (ONLY_ON_DEVICE model)
 - ✅ Cloud inference (ONLY_IN_CLOUD model, Gemini Developer API)
 - ✅ App Check with reCAPTCHA Enterprise (dev debug token support)
-- ✅ Regex-based PII safety net (phone, email, account numbers, BVN/NIN)
+- ✅ Regex-based PII masker (phone, email, account numbers, BVN/NIN, card numbers)
 - ✅ On-device availability detection (`LanguageModel.availability()`)
-- 🚧 Scam check prompt + structured JSON response (verdict, confidence, redFlags, advice)
-- 🚧 On-device PII masking with Gemini Nano
+- ✅ **Scam check feature** — structured JSON output (verdict, confidence, category, redFlags, summary, advice)
+- ✅ **Explicit hybrid routing** — on-device → download prompt → cloud (consent-gated); no silent fallbacks
+- ✅ **Full production UI** — ModelStatus, MessageInput, VerdictCard, ConsentDialog components
+- ✅ **Developer test harness** — 14 synthetic test messages (9 scam types + 5 legit), accuracy reporting
+- 🚧 On-device PII masking with Gemini Nano (regex masking is active; AI-enhanced masking planned)
 - 🚧 Deep investigation with Google Search grounding
 - 🚧 Multi-turn follow-up chat
 - 🚧 Screenshot / image input (OCR via Gemini Nano)
 - 🚧 Firestore community reports
 - 🚧 Remote Config scam trend injection
-- 🚧 Production UI
 
 ---
 
