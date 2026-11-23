@@ -1,5 +1,5 @@
 // TestRunner — developer tool for comparing three inference modes against the
-// 18 synthetic test messages.
+// 20 synthetic test messages (18 original + 2 credential_request fix tests).
 //
 // Modes:
 //   AI only      — on-device, plain prompt, no rules, no post-processing (v1 baseline)
@@ -11,7 +11,7 @@
 // When all three modes have results, the comparison view is shown automatically.
 // "Export" generates a Markdown report for docs/eval-results.md.
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { onDeviceCheck, cloudCheck, warmUpDeviceModel } from '../ai/checkMessage';
 import { aiOnlyCheck } from './aiOnlyCheck';
 import { TEST_MESSAGES } from './testMessages';
@@ -25,45 +25,71 @@ const MODES = [
 ];
 const MODE_IDS = MODES.map((m) => m.id);
 
+// Delay between cloud requests (ms) — avoids rate limiting
+const CLOUD_INTER_REQUEST_DELAY_MS = 4000;
+// Max retries on rate-limit or server errors
+const MAX_RETRIES = 3;
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function normalizeVerdict(v) {
+  return typeof v === 'string' ? v.trim().toLowerCase() : v;
+}
 
 async function checkForMode(modeId, text) {
   if (modeId === 'ai-only') return aiOnlyCheck(text);
   if (modeId === 'rules-ai') return onDeviceCheck(text);
-  return cloudCheck(text); // handles regexMask internally
+  return cloudCheck(text);
+}
+
+function isRateLimitError(err) {
+  const msg = (err?.message ?? String(err)).toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('quota') ||
+    msg.includes('rate limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('overloaded')
+  );
 }
 
 function buildRow(msg, result, elapsed) {
+  const verdict = normalizeVerdict(result.verdict);
   const verdictMatch = Array.isArray(msg.expected)
-    ? msg.expected.includes(result.verdict)
-    : result.verdict === msg.expected;
-  const categoryMatch = Array.isArray(msg.expectedCategory)
-    ? msg.expectedCategory.includes(result.category)
-    : result.category === msg.expectedCategory;
-  // Ambiguous test cases (array expected with both safe+suspicious) are neither FP nor FN
+    ? msg.expected.includes(verdict)
+    : verdict === msg.expected;
   const isAmbiguous = Array.isArray(msg.expected) && msg.expected.length > 1;
   const expectedIsSafe = !isAmbiguous && (Array.isArray(msg.expected)
     ? msg.expected.every((e) => e === 'safe')
     : msg.expected === 'safe');
-  const isFP = !isAmbiguous && expectedIsSafe && result.verdict !== 'safe';
-  const isFN = !isAmbiguous && !expectedIsSafe && result.verdict === 'safe';
+  const isExpectedScam = !isAmbiguous && !expectedIsSafe;
+  const isFP = !isAmbiguous && expectedIsSafe && verdict !== 'safe';
+  const isFN = !isAmbiguous && !expectedIsSafe && verdict === 'safe';
+  const isCaughtScam = isExpectedScam && !isFN && (verdict === 'scam' || verdict === 'suspicious');
   return {
     id: msg.id,
     label: msg.label,
     expected: Array.isArray(msg.expected) ? msg.expected.join('/') : msg.expected,
-    actual: result.verdict,
+    actual: verdict,
     actualCategory: result.category,
     confidence: result.confidence,
     verdictMatch,
-    categoryMatch,
+    isExpectedScam,
+    isExpectedSafe: expectedIsSafe,
     isFP,
     isFN,
+    isCaughtScam,
     durationMs: result.durationMs ?? elapsed,
     error: null,
   };
 }
 
 function buildErrorRow(msg, err, elapsed) {
+  const isAmbiguous = Array.isArray(msg.expected) && msg.expected.length > 1;
+  const expectedIsSafe = !isAmbiguous && (Array.isArray(msg.expected)
+    ? msg.expected.every((e) => e === 'safe')
+    : msg.expected === 'safe');
   return {
     id: msg.id,
     label: msg.label,
@@ -72,9 +98,11 @@ function buildErrorRow(msg, err, elapsed) {
     actualCategory: '—',
     confidence: '—',
     verdictMatch: false,
-    categoryMatch: false,
+    isExpectedScam: !isAmbiguous && !expectedIsSafe,
+    isExpectedSafe: expectedIsSafe,
     isFP: false,
     isFN: false,
+    isCaughtScam: false,
     durationMs: elapsed,
     error: err?.message ?? String(err),
   };
@@ -82,20 +110,35 @@ function buildErrorRow(msg, err, elapsed) {
 
 function computeStats(rows) {
   if (!rows || rows.length === 0) return null;
-  const done = rows.filter((r) => !r.error);
+  const errors = rows.filter((r) => r.error);
   const correct = rows.filter((r) => r.verdictMatch).length;
   const fp = rows.filter((r) => r.isFP).length;
   const fn = rows.filter((r) => r.isFN).length;
+
+  // Scams caught: expected-scam messages that got scam or suspicious
+  const scamTotal = rows.filter((r) => r.isExpectedScam).length;
+  const scamsCaught = rows.filter((r) => r.isCaughtScam).length;
+
+  // False alarms: expected-safe messages that got non-safe
+  const safeTotal = rows.filter((r) => r.isExpectedSafe).length;
+  const falseAlarms = rows.filter((r) => r.isFP).length; // isFP = expected safe, got non-safe
+
   const firstMs = rows[0]?.durationMs ?? null;
   const rest = rows.slice(1).filter((r) => !r.error);
   const avgMs = rest.length > 0
     ? Math.round(rest.reduce((s, r) => s + r.durationMs, 0) / rest.length)
     : null;
+
   return {
     total: rows.length,
     correct,
-    accuracy: done.length > 0 ? Math.round((correct / done.length) * 100) : 0,
-    fp, fn, firstMs, avgMs,
+    // Accuracy counts errors as failures (denominator = all messages)
+    accuracy: Math.round((correct / rows.length) * 100),
+    fp, fn,
+    errors: errors.length,
+    scamTotal, scamsCaught,
+    safeTotal, falseAlarms,
+    firstMs, avgMs,
   };
 }
 
@@ -105,10 +148,14 @@ export default function TestRunner() {
   const [runStatus, setRunStatus] = useState('idle'); // 'idle'|'warming'|'running'|'done'
   const [currentMode, setCurrentMode] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(-1);
+  const [retryMsg, setRetryMsg] = useState('');
   const [warmupMs, setWarmupMs] = useState(null);
   const [modeRows, setModeRows] = useState({}); // { [modeId]: row[] }
   const [selectedMode, setSelectedMode] = useState('rules-ai');
   const [exportText, setExportText] = useState('');
+
+  // Keep a ref to modeRows for use in closures without stale state
+  const modeRowsRef = useRef({});
 
   const isRunning = runStatus === 'warming' || runStatus === 'running';
   const allModesComplete = MODE_IDS.every(
@@ -117,23 +164,58 @@ export default function TestRunner() {
 
   // ── Core run logic ───────────────────────────────────────────────────────────
 
+  async function checkWithRetry(modeId, text, retryCount = 0) {
+    try {
+      return await checkForMode(modeId, text);
+    } catch (err) {
+      const isCloud = modeId === 'cloud';
+      const isRL = isRateLimitError(err);
+
+      // Cloud: retry on rate limit or server error up to MAX_RETRIES
+      if (isCloud && (isRL || err?.message?.includes('5')) && retryCount < MAX_RETRIES) {
+        const delayMs = Math.pow(2, retryCount) * 2000; // 2s, 4s, 8s
+        setRetryMsg(`Rate limited — retrying in ${delayMs / 1000}s…`);
+        await new Promise((r) => setTimeout(r, delayMs));
+        setRetryMsg('');
+        return checkWithRetry(modeId, text, retryCount + 1);
+      }
+
+      // On-device: retry once (already handled inside onDeviceCheck/aiOnlyCheck, but
+      // also retry at this level for unexpected errors)
+      if (!isCloud && retryCount < 1) {
+        setRetryMsg('On-device error — retrying…');
+        await new Promise((r) => setTimeout(r, 500));
+        setRetryMsg('');
+        return checkWithRetry(modeId, text, retryCount + 1);
+      }
+
+      throw err;
+    }
+  }
+
   async function runModeMessages(modeId) {
     const rows = [];
     for (let i = 0; i < TEST_MESSAGES.length; i++) {
       const msg = TEST_MESSAGES[i];
       setCurrentIndex(i);
-      // Small delay between cloud requests to avoid rate limits
+
+      // Inter-request delay for cloud mode (after first request)
       if (modeId === 'cloud' && i > 0) {
-        await new Promise((r) => setTimeout(r, 300));
+        await new Promise((r) => setTimeout(r, CLOUD_INTER_REQUEST_DELAY_MS));
       }
+
       const start = Date.now();
       try {
-        const result = await checkForMode(modeId, msg.text);
+        const result = await checkWithRetry(modeId, msg.text);
         rows.push(buildRow(msg, result, Date.now() - start));
       } catch (err) {
         rows.push(buildErrorRow(msg, err, Date.now() - start));
       }
-      setModeRows((prev) => ({ ...prev, [modeId]: [...rows] }));
+
+      // Update state reactively so table fills in live
+      const snapshot = [...rows];
+      modeRowsRef.current = { ...modeRowsRef.current, [modeId]: snapshot };
+      setModeRows({ ...modeRowsRef.current });
     }
     return rows;
   }
@@ -147,7 +229,9 @@ export default function TestRunner() {
 
   async function handleRunSelected() {
     setExportText('');
-    setModeRows((prev) => { const next = { ...prev }; delete next[selectedMode]; return next; });
+    modeRowsRef.current = { ...modeRowsRef.current };
+    delete modeRowsRef.current[selectedMode];
+    setModeRows({ ...modeRowsRef.current });
 
     if (selectedMode !== 'cloud') {
       await doWarmup();
@@ -159,10 +243,12 @@ export default function TestRunner() {
     setRunStatus('done');
     setCurrentMode(null);
     setCurrentIndex(-1);
+    setRetryMsg('');
   }
 
   async function handleRunAll() {
     setExportText('');
+    modeRowsRef.current = {};
     setModeRows({});
     setCurrentMode(null);
     setCurrentIndex(-1);
@@ -179,6 +265,7 @@ export default function TestRunner() {
     setRunStatus('done');
     setCurrentMode(null);
     setCurrentIndex(-1);
+    setRetryMsg('');
   }
 
   // ── Export ───────────────────────────────────────────────────────────────────
@@ -191,24 +278,26 @@ export default function TestRunner() {
     }
 
     if (allModesComplete) {
-      // Comparison summary table
       lines.push('### Mode Comparison Summary', '');
       lines.push('| Metric | AI only | Rules + AI | Cloud |');
       lines.push('|--------|---------|------------|-------|');
 
       const stats = {};
       for (const id of MODE_IDS) stats[id] = computeStats(modeRows[id]);
+      const s = (id) => stats[id];
 
       lines.push(
-        `| Verdict accuracy | ${stats['ai-only'].accuracy}% (${stats['ai-only'].correct}/${stats['ai-only'].total}) | ${stats['rules-ai'].accuracy}% (${stats['rules-ai'].correct}/${stats['rules-ai'].total}) | ${stats['cloud'].accuracy}% (${stats['cloud'].correct}/${stats['cloud'].total}) |`,
-        `| False positives  | ${stats['ai-only'].fp} | ${stats['rules-ai'].fp} | ${stats['cloud'].fp} |`,
-        `| False negatives  | ${stats['ai-only'].fn} | ${stats['rules-ai'].fn} | ${stats['cloud'].fn} |`,
-        `| First run        | ${stats['ai-only'].firstMs?.toLocaleString() ?? '—'} ms | ${stats['rules-ai'].firstMs?.toLocaleString() ?? '—'} ms | ${stats['cloud'].firstMs?.toLocaleString() ?? '—'} ms |`,
-        `| Avg (runs 2–${TEST_MESSAGES.length}) | ${stats['ai-only'].avgMs?.toLocaleString() ?? '—'} ms | ${stats['rules-ai'].avgMs?.toLocaleString() ?? '—'} ms | ${stats['cloud'].avgMs?.toLocaleString() ?? '—'} ms |`,
+        `| Verdict accuracy | ${s('ai-only').accuracy}% (${s('ai-only').correct}/${s('ai-only').total}) | ${s('rules-ai').accuracy}% (${s('rules-ai').correct}/${s('rules-ai').total}) | ${s('cloud').accuracy}% (${s('cloud').correct}/${s('cloud').total}) |`,
+        `| Scams caught     | ${s('ai-only').scamsCaught}/${s('ai-only').scamTotal} | ${s('rules-ai').scamsCaught}/${s('rules-ai').scamTotal} | ${s('cloud').scamsCaught}/${s('cloud').scamTotal} |`,
+        `| False alarms     | ${s('ai-only').falseAlarms}/${s('ai-only').safeTotal} | ${s('rules-ai').falseAlarms}/${s('rules-ai').safeTotal} | ${s('cloud').falseAlarms}/${s('cloud').safeTotal} |`,
+        `| False positives  | ${s('ai-only').fp} | ${s('rules-ai').fp} | ${s('cloud').fp} |`,
+        `| False negatives  | ${s('ai-only').fn} | ${s('rules-ai').fn} | ${s('cloud').fn} |`,
+        `| Errors           | ${s('ai-only').errors} | ${s('rules-ai').errors} | ${s('cloud').errors} |`,
+        `| First run        | ${s('ai-only').firstMs?.toLocaleString() ?? '—'} ms | ${s('rules-ai').firstMs?.toLocaleString() ?? '—'} ms | ${s('cloud').firstMs?.toLocaleString() ?? '—'} ms |`,
+        `| Avg (runs 2–${TEST_MESSAGES.length}) | ${s('ai-only').avgMs?.toLocaleString() ?? '—'} ms | ${s('rules-ai').avgMs?.toLocaleString() ?? '—'} ms | ${s('cloud').avgMs?.toLocaleString() ?? '—'} ms |`,
       );
       lines.push('');
 
-      // Per-message comparison table
       lines.push('### Per-message Results', '');
       lines.push('| # | Label | Expected | AI only | Rules + AI | Cloud |');
       lines.push('|---|-------|----------|---------|------------|-------|');
@@ -218,7 +307,7 @@ export default function TestRunner() {
         const cells = MODE_IDS.map((id) => {
           const row = modeRows[id]?.[i];
           if (!row) return '—';
-          if (row.error) return 'ERR';
+          if (row.error) return `ERR`;
           const mark = row.verdictMatch ? '✓' : '✗';
           const fp = row.isFP ? ' FP' : '';
           const fn = row.isFN ? ' FN' : '';
@@ -226,15 +315,34 @@ export default function TestRunner() {
         });
         lines.push(`| ${msg.id} | ${msg.label} | ${exp} | ${cells.join(' | ')} |`);
       });
+      lines.push('');
+
+      // Error details section
+      const allErrors = [];
+      for (const id of MODE_IDS) {
+        const mode = MODES.find((m) => m.id === id);
+        modeRows[id]?.forEach((row) => {
+          if (row.error) allErrors.push({ mode: mode.short, id: row.id, label: row.label, error: row.error });
+        });
+      }
+      if (allErrors.length > 0) {
+        lines.push('### Error Details', '');
+        lines.push('| # | Mode | Label | Error |');
+        lines.push('|---|------|-------|-------|');
+        allErrors.forEach(({ mode, id, label, error }) => {
+          lines.push(`| ${id} | ${mode} | ${label} | ${error.slice(0, 120)} |`);
+        });
+        lines.push('');
+      }
     } else {
-      // Single mode result
       const availableModes = MODE_IDS.filter((id) => modeRows[id]?.length > 0);
       for (const id of availableModes) {
         const mode = MODES.find((m) => m.id === id);
         const stats = computeStats(modeRows[id]);
         lines.push(`### ${mode.label}`, '');
         lines.push(`**Verdict accuracy:** ${stats.accuracy}% (${stats.correct}/${stats.total})`);
-        lines.push(`**False positives:** ${stats.fp}  **False negatives:** ${stats.fn}`);
+        lines.push(`**Scams caught:** ${stats.scamsCaught}/${stats.scamTotal}  **False alarms:** ${stats.falseAlarms}/${stats.safeTotal}`);
+        lines.push(`**FP:** ${stats.fp}  **FN:** ${stats.fn}  **Errors:** ${stats.errors}`);
         if (stats.firstMs != null) lines.push(`**First run:** ${stats.firstMs.toLocaleString()} ms`);
         if (stats.avgMs != null) lines.push(`**Avg (runs 2–${modeRows[id].length}):** ${stats.avgMs.toLocaleString()} ms`);
         lines.push('');
@@ -247,6 +355,13 @@ export default function TestRunner() {
           lines.push(`| ${r.id} | ${r.label} | ${r.expected} | ${mark} ${r.actual}${fp}${fn} | ${r.actualCategory} | ${r.confidence} | ${r.durationMs.toLocaleString()} ms |`);
         });
         lines.push('');
+
+        const errors = modeRows[id].filter((r) => r.error);
+        if (errors.length > 0) {
+          lines.push('**Errors:**', '');
+          errors.forEach((r) => lines.push(`- #${r.id} ${r.label}: ${r.error}`));
+          lines.push('');
+        }
       }
     }
 
@@ -256,6 +371,7 @@ export default function TestRunner() {
   // ── Status label ─────────────────────────────────────────────────────────────
 
   function statusLabel() {
+    if (retryMsg) return retryMsg;
     if (runStatus === 'warming') return 'Warming up on-device model…';
     if (runStatus === 'running' && currentMode) {
       const mode = MODES.find((m) => m.id === currentMode);
@@ -303,7 +419,7 @@ export default function TestRunner() {
 
       {/* Progress */}
       {isRunning && (
-        <div style={styles.progress}>
+        <div style={retryMsg ? { ...styles.progress, ...styles.progressRetry } : styles.progress}>
           <span style={styles.progressDot} />
           <span>{statusLabel()}</span>
           {MODE_IDS.map((id) => {
@@ -376,10 +492,21 @@ export default function TestRunner() {
 function ComparisonView({ modeRows, warmupMs }) {
   const stats = {};
   for (const id of MODE_IDS) stats[id] = computeStats(modeRows[id]);
+  const s = (id) => stats[id];
+
+  const metricRows = [
+    ['Verdict accuracy', (id) => `${s(id).accuracy}% (${s(id).correct}/${s(id).total})`],
+    ['Scams caught',     (id) => `${s(id).scamsCaught}/${s(id).scamTotal}`],
+    ['False alarms',     (id) => `${s(id).falseAlarms}/${s(id).safeTotal}`],
+    ['False positives',  (id) => s(id).fp],
+    ['False negatives',  (id) => s(id).fn],
+    ['Errors',           (id) => s(id).errors],
+    ['First run',        (id) => s(id).firstMs != null ? `${s(id).firstMs.toLocaleString()} ms` : '—'],
+    [`Avg (2–${TEST_MESSAGES.length})`, (id) => s(id).avgMs != null ? `${s(id).avgMs.toLocaleString()} ms` : '—'],
+  ];
 
   return (
     <div style={{ marginTop: 12 }}>
-      {/* Summary table */}
       <div style={styles.sectionLabel}>Mode comparison</div>
       <div style={{ overflowX: 'auto' }}>
         <table style={styles.table}>
@@ -390,17 +517,11 @@ function ComparisonView({ modeRows, warmupMs }) {
             </tr>
           </thead>
           <tbody>
-            {[
-              ['Verdict accuracy', (s) => `${s.accuracy}% (${s.correct}/${s.total})`],
-              ['False positives',  (s) => s.fp],
-              ['False negatives',  (s) => s.fn],
-              ['First run',        (s) => s.firstMs != null ? `${s.firstMs.toLocaleString()} ms` : '—'],
-              [`Avg (2–${TEST_MESSAGES.length})`, (s) => s.avgMs != null ? `${s.avgMs.toLocaleString()} ms` : '—'],
-            ].map(([label, fn]) => (
+            {metricRows.map(([label, fn]) => (
               <tr key={label}>
                 <td style={{ ...styles.td, fontWeight: 600 }}>{label}</td>
                 {MODES.map((m) => (
-                  <td key={m.id} style={styles.td}>{stats[m.id] ? fn(stats[m.id]) : '—'}</td>
+                  <td key={m.id} style={styles.td}>{stats[m.id] ? fn(m.id) : '—'}</td>
                 ))}
               </tr>
             ))}
@@ -416,7 +537,6 @@ function ComparisonView({ modeRows, warmupMs }) {
         </table>
       </div>
 
-      {/* Per-message comparison */}
       <div style={{ ...styles.sectionLabel, marginTop: 16 }}>Per-message</div>
       <div style={{ overflowX: 'auto' }}>
         <table style={styles.table}>
@@ -431,8 +551,9 @@ function ComparisonView({ modeRows, warmupMs }) {
           <tbody>
             {TEST_MESSAGES.map((msg, i) => {
               const exp = Array.isArray(msg.expected) ? msg.expected.join('/') : msg.expected;
-              // Row background: fail if any mode missed it
-              const anyFail = MODE_IDS.some((id) => modeRows[id]?.[i] && !modeRows[id][i].verdictMatch && !modeRows[id][i].error);
+              const anyFail = MODE_IDS.some(
+                (id) => modeRows[id]?.[i] && !modeRows[id][i].verdictMatch && !modeRows[id][i].error
+              );
               return (
                 <tr key={msg.id} style={anyFail ? styles.rowFail : styles.rowPass}>
                   <td style={styles.td}>{msg.id}</td>
@@ -463,11 +584,12 @@ function SingleModeView({ modeId, rows, warmupMs }) {
       <div style={styles.sectionLabel}>{mode.label}</div>
       {done && stats && (
         <div style={styles.statRow}>
-          <span style={styles.statBadge}>
-            {stats.accuracy}% ({stats.correct}/{stats.total})
-          </span>
+          <span style={styles.statBadge}>{stats.accuracy}% ({stats.correct}/{stats.total})</span>
+          <span style={styles.statBadge}>Scams: {stats.scamsCaught}/{stats.scamTotal}</span>
+          <span style={styles.statBadge}>Alarms: {stats.falseAlarms}/{stats.safeTotal}</span>
           <span style={styles.statBadge}>FP: {stats.fp}</span>
           <span style={styles.statBadge}>FN: {stats.fn}</span>
+          {stats.errors > 0 && <span style={{ ...styles.statBadge, ...styles.badgeError }}>Errors: {stats.errors}</span>}
           {stats.firstMs != null && (
             <span style={styles.timingPill}>First: {stats.firstMs.toLocaleString()} ms</span>
           )}
@@ -501,9 +623,7 @@ function SingleModeView({ modeId, rows, warmupMs }) {
                 <td style={styles.td}>{row.id}</td>
                 <td style={{ ...styles.td, ...styles.tdLabel }}>{row.label}</td>
                 <td style={styles.td}><VerdictPill v={row.expected} /></td>
-                <td style={styles.td}>
-                  <ResultCell row={row} showVerdict />
-                </td>
+                <td style={styles.td}><ResultCell row={row} /></td>
                 <td style={styles.td}>
                   {row.error ? '—' : (
                     <span style={{ fontSize: '0.75rem', opacity: 0.75 }}>{row.actualCategory}</span>
@@ -520,18 +640,23 @@ function SingleModeView({ modeId, rows, warmupMs }) {
   );
 }
 
-function ResultCell({ row, showVerdict }) {
+function ResultCell({ row }) {
   if (!row) return <span style={{ opacity: 0.4 }}>—</span>;
   if (row.error) {
-    return <span style={{ color: '#dc2626', fontWeight: 600, cursor: 'help' }} title={row.error}>ERR</span>;
+    return (
+      <span
+        style={{ color: '#dc2626', fontWeight: 600, cursor: 'help', textDecoration: 'underline dotted' }}
+        title={row.error}
+      >
+        ERR
+      </span>
+    );
   }
   const color = row.verdictMatch ? '#166534' : row.isFP ? '#dc2626' : row.isFN ? '#d97706' : '#6b7280';
   const mark = row.verdictMatch ? '✓' : '✗';
   return (
     <span style={{ color, fontWeight: 600, fontSize: '0.82rem' }}>
-      {mark}
-      {showVerdict && ` ${row.actual}`}
-      {!showVerdict && ` ${row.actual}`}
+      {mark} {row.actual}
       {row.isFP && <span style={{ fontSize: '0.68rem', marginLeft: 2 }}>FP</span>}
       {row.isFN && <span style={{ fontSize: '0.68rem', marginLeft: 2 }}>FN</span>}
     </span>
@@ -635,6 +760,11 @@ const styles = {
     marginBottom: 12,
     flexWrap: 'wrap',
   },
+  progressRetry: {
+    background: '#fffbeb',
+    border: '1px solid #fcd34d',
+    color: '#92400e',
+  },
   progressDot: {
     display: 'inline-block',
     width: 7,
@@ -687,6 +817,10 @@ const styles = {
     color: '#374151',
     padding: '3px 10px',
     borderRadius: 99,
+  },
+  badgeError: {
+    background: '#fef2f2',
+    color: '#991b1b',
   },
   timingPill: {
     fontSize: '0.78rem',
@@ -742,7 +876,7 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
-  rowPass: { background: '#f0fdf4' },
-  rowFail: { background: '#fef2f2' },
+  rowPass:  { background: '#f0fdf4' },
+  rowFail:  { background: '#fef2f2' },
   rowError: { background: '#fffbeb' },
 };

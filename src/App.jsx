@@ -5,6 +5,7 @@ import {
   checkMessage, downloadAndCheck, cloudCheck,
   preloadDeviceModel, warmUpDeviceModel,
 } from './ai/checkMessage';
+import { analyzeSignals } from './ai/rules';
 import ModelStatus from './components/ModelStatus';
 import MessageInput from './components/MessageInput';
 import VerdictCard from './components/VerdictCard';
@@ -40,6 +41,9 @@ export default function App() {
   const [secondOpinionState, setSecondOpinionState] = useState('idle');
   const [secondResult, setSecondResult] = useState(null);
   const [secondErrorMsg, setSecondErrorMsg] = useState('');
+
+  // ── Instant rules preview ──────────────────────────────────────────────────
+  const [preliminarySignals, setPreliminarySignals] = useState(null);
 
   // Tick elapsed time every 100 ms while a check is running
   useEffect(() => {
@@ -80,10 +84,10 @@ export default function App() {
       setResult(null);
       setErrorMsg('');
     }
-    // Clear second opinion when text changes
     setSecondOpinionState('idle');
     setSecondResult(null);
     setSecondErrorMsg('');
+    setPreliminarySignals(null);
   }
 
   function handleClear() {
@@ -94,18 +98,23 @@ export default function App() {
     setSecondOpinionState('idle');
     setSecondResult(null);
     setSecondErrorMsg('');
+    setPreliminarySignals(null);
   }
 
   // ── Main check entry point ─────────────────────────────────────────────────
 
   async function handleCheck() {
     if (!text.trim()) return;
+    // analyzeSignals is synchronous — runs before the first await so the
+    // preliminary card appears in the same render batch as 'checking' state.
+    const instant = analyzeSignals(text.trim());
     setAppState('checking');
     setResult(null);
     setErrorMsg('');
     setSecondOpinionState('idle');
     setSecondResult(null);
     setSecondErrorMsg('');
+    setPreliminarySignals(instant);
     startProgress();
 
     try {
@@ -264,6 +273,11 @@ export default function App() {
         disabled={isChecking || isDownloading}
       />
 
+      {/* Instant rules preview — shown while AI is running */}
+      {preliminarySignals && appState === 'checking' && (
+        <PreliminaryCard signals={preliminarySignals} />
+      )}
+
       {/* Live progress indicator while checking */}
       {(isChecking || isSecondChecking) && (
         <div style={styles.progressBox}>
@@ -354,6 +368,76 @@ export default function App() {
     </div>
   );
 }
+
+function PreliminaryCard({ signals }) {
+  const riskSignals = signals.signals.filter((s) => s.weight > 0 && s.phrase);
+  // Deduplicate by signal id so we show one bullet per signal type
+  const seen = new Set();
+  const unique = riskSignals.filter((s) => {
+    if (seen.has(s.id)) return false;
+    seen.add(s.id);
+    return true;
+  });
+  const count = unique.length;
+
+  return (
+    <div style={prelStyles.box}>
+      <div style={prelStyles.header}>
+        {count > 0
+          ? `⚡ ${count} warning sign${count > 1 ? 's' : ''} detected instantly`
+          : '⚡ No obvious warning signs — AI review in progress…'}
+      </div>
+      {unique.length > 0 && (
+        <ul style={prelStyles.list}>
+          {unique.slice(0, 4).map((s) => (
+            <li key={s.id} style={prelStyles.item}>
+              <span style={prelStyles.label}>{s.label}</span>
+              {s.phrase && <span style={prelStyles.phrase}>"{s.phrase}"</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {count > 0 && <div style={prelStyles.footer}>AI review in progress…</div>}
+    </div>
+  );
+}
+
+const prelStyles = {
+  box: {
+    background: '#fffbeb',
+    border: '1px solid #fcd34d',
+    borderRadius: 8,
+    padding: '12px 16px',
+    marginTop: 12,
+  },
+  header: {
+    fontSize: '0.875rem',
+    fontWeight: 600,
+    color: '#92400e',
+  },
+  list: {
+    margin: '8px 0 4px',
+    paddingLeft: 18,
+  },
+  item: {
+    fontSize: '0.82rem',
+    color: '#78350f',
+    marginBottom: 3,
+  },
+  label: {
+    fontWeight: 600,
+    marginRight: 6,
+  },
+  phrase: {
+    fontStyle: 'italic',
+    opacity: 0.85,
+  },
+  footer: {
+    fontSize: '0.75rem',
+    color: '#a16207',
+    marginTop: 6,
+  },
+};
 
 const styles = {
   container: {

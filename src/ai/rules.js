@@ -23,6 +23,7 @@ const RULES = [
     weight: 4,
     // "share/send/give/tell/forward" near otp/code/pin/password/bvn/nin/cvv/token
     // "enter/provide/type/input" near otp/pin/password/bvn/nin/cvv
+    // Post-filtered in analyzeSignals to exclude protective "do not share" phrasing.
     pattern: /\b(share|send|give|tell|forward)\b.{0,30}\b(otp|code|pin|password|bvn|nin|cvv|token)\b|\b(enter|provide|type|input|submit)\b.{0,30}\b(otp|pin|password|bvn|nin|cvv)\b/,
   },
   {
@@ -136,8 +137,18 @@ export function analyzeSignals(text) {
     });
   }
 
-  const ruleScore = signals.reduce((sum, s) => sum + s.weight, 0);
-  return { signals, ruleScore };
+  // credential_request post-filter: drop matches that are part of a protective
+  // "do not share / never share" phrase. Only fire when the message ASKS the reader
+  // to share/send credentials — not when it warns them not to.
+  const filtered = signals.filter((s) => {
+    if (s.id !== 'credential_request') return true;
+    // Look at up to 30 chars before the matched verb for a negation word
+    const before = text.slice(Math.max(0, s.start - 30), s.start).toLowerCase();
+    return !/(do\s+not|don'?t|never|will\s+never|not\s+ask)\s*$/.test(before);
+  });
+
+  const ruleScore = filtered.reduce((sum, s) => sum + s.weight, 0);
+  return { signals: filtered, ruleScore };
 }
 
 function isStandardAlertFormat(text) {

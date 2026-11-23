@@ -55,12 +55,25 @@ export function parseCheckResult(rawJson) {
     const cleaned = rawJson.replace(/^```(?:json)?\n?|\n?```$/g, '').trim();
     parsed = JSON.parse(cleaned);
   } catch {
-    throw new Error(`Model returned invalid JSON: ${rawJson.slice(0, 200)}`);
+    // Fallback: try to extract the first JSON object from the response
+    const match = rawJson.match(/\{[\s\S]*\}/);
+    if (match) {
+      try {
+        parsed = JSON.parse(match[0]);
+      } catch {
+        console.error('[ScamShield] Raw model output (unparseable):', rawJson.slice(0, 500));
+        throw new Error(`Model returned invalid JSON: ${rawJson.slice(0, 200)}`);
+      }
+    } else {
+      console.error('[ScamShield] Raw model output (no JSON found):', rawJson.slice(0, 500));
+      throw new Error(`Model returned invalid JSON: ${rawJson.slice(0, 200)}`);
+    }
   }
 
   const required = ['verdict', 'confidence', 'category', 'redFlags'];
   for (const field of required) {
     if (parsed[field] === undefined) {
+      console.error('[ScamShield] Raw model output (missing field):', rawJson.slice(0, 500));
       throw new Error(`Model response missing field: ${field}`);
     }
   }
@@ -77,10 +90,11 @@ export function parseCheckResult(rawJson) {
   // explanation may be missing in some model responses; fall back to empty string
   const explanation = String(parsed.explanation ?? parsed.summary ?? '');
 
+  // Normalise enum fields to lowercase (model may return 'SAFE', 'SCAM', etc.)
   return {
-    verdict: parsed.verdict,
-    confidence: parsed.confidence,
-    category: parsed.category,
+    verdict: String(parsed.verdict ?? '').toLowerCase().trim(),
+    confidence: String(parsed.confidence ?? '').toLowerCase().trim(),
+    category: String(parsed.category ?? '').toLowerCase().trim(),
     redFlags,
     explanation,
   };
@@ -221,27 +235,32 @@ export async function warmUpDeviceModel() {
  */
 export async function onDeviceCheck(text, onChunk) {
   const start = Date.now();
-
   const { signals, ruleScore } = analyzeSignals(text);
-  const streamResult = await onDeviceModel.generateContentStream(buildRequest(text, signals));
+  const request = buildRequest(text, signals);
+  console.log(`[ScamShield] On-device prompt: ${request.contents[0].parts[0].text.length} chars, ${signals.length} signals`);
 
-  let charsReceived = 0;
-  for await (const chunk of streamResult.stream) {
-    const chunkText = chunk.text();
-    charsReceived += chunkText.length;
-    try { onChunk?.(charsReceived); } catch { /* ignore callback errors */ }
+  async function attempt() {
+    const streamResult = await onDeviceModel.generateContentStream(request);
+    let charsReceived = 0;
+    for await (const chunk of streamResult.stream) {
+      const chunkText = chunk.text();
+      charsReceived += chunkText.length;
+      try { onChunk?.(charsReceived); } catch { /* ignore callback errors */ }
+    }
+    const raw = (await streamResult.response).text();
+    const aiResult = parseCheckResult(raw);
+    return applyConsistency(text, aiResult, signals, ruleScore);
   }
 
-  const raw = (await streamResult.response).text();
-  const aiResult = parseCheckResult(raw);
-  const finalResult = applyConsistency(text, aiResult, signals, ruleScore);
+  let result;
+  try {
+    result = await attempt();
+  } catch (err) {
+    console.warn('[ScamShield] On-device check failed, retrying once:', err.message);
+    result = await attempt();
+  }
 
-  return {
-    ...finalResult,
-    source: 'on-device',
-    signals,
-    durationMs: Date.now() - start,
-  };
+  return { ...result, source: 'on-device', signals, durationMs: Date.now() - start };
 }
 
 /**

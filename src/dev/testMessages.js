@@ -143,4 +143,23 @@ export const TEST_MESSAGES = [
     expected: ['safe', 'suspicious'],
     expectedCategory: ['none', 'other'],
   },
+
+  // ── CREDENTIAL_REQUEST RULE TESTS ──────────────────────────────────────────
+  // These two messages specifically test that credential_request fires on imperative
+  // asks but NOT on protective "do not share" warnings (see rules.js post-filter).
+
+  {
+    id: 19,
+    label: 'Defensive OTP — do not share warning',
+    text: 'Zenith Bank: Your OTP is 718263. Valid for 10 minutes. Do NOT share this PIN with anyone, including bank staff. We will never ask you to share this code.',
+    expected: 'safe',
+    expectedCategory: 'none',
+  },
+  {
+    id: 20,
+    label: 'Imperative credential ask — OTP phishing',
+    text: 'Your transfer is pending. Please send your OTP to our agent on 0001-444-5678 to complete the verification process immediately.',
+    expected: 'scam',
+    expectedCategory: 'otp_pin_request',
+  },
 ];
