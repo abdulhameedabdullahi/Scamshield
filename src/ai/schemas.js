@@ -1,23 +1,37 @@
 // Response schema for the scam check feature.
 //
-// Firebase AI Logic supports constrained JSON output via:
-//   generationConfig.responseMimeType = 'application/json'
-//   generationConfig.responseSchema   = <Schema instance>
+// Field order is intentionally reasoning-first:
+//   redFlags → explanation → verdict → confidence → category
+// This forces Gemini Nano to cite evidence and explain before committing to a verdict,
+// improving chain-of-thought consistency for small models.
 //
-// The Schema class and its static builders are verified against
-// node_modules/@firebase/ai/dist/src/requests/schema-builder.d.ts:
-//   Schema.object({ properties, optionalProperties? })
-//   Schema.enumString({ enum: string[], description? })
-//   Schema.array({ items: Schema, maxItems? })
-//   Schema.string({ description? })
+// redFlags is now an array of objects { phrase, reason } instead of plain strings:
+//   - phrase: exact text copied from the message (verified post-hoc in checkMessage.js)
+//   - reason: short explanation of why that phrase is suspicious
 //
-// SchemaParams (from schema.d.ts) supports: description, maxItems, etc.
+// Schema.array({ items: Schema.object({...}) }) nesting is confirmed valid in
+// @firebase/ai/dist/src/requests/schema-builder.d.ts:
+//   Schema.array(SchemaParams & { items: Schema }) — items accepts any Schema instance.
 
 import { Schema } from 'firebase/ai';
 
-// All six fields are required (no optionalProperties).
+const RED_FLAG_ITEM = Schema.object({
+  properties: {
+    phrase: Schema.string({ description: 'Exact text copied from the message' }),
+    reason: Schema.string({ description: 'Short reason this phrase is suspicious' }),
+  },
+});
+
 export const SCAM_RESULT_SCHEMA = Schema.object({
   properties: {
+    redFlags: Schema.array({
+      items: RED_FLAG_ITEM,
+      maxItems: 3,
+      description: 'Up to 3 red flags, each with an exact phrase from the message and a short reason',
+    }),
+    explanation: Schema.string({
+      description: 'One sentence explaining the overall verdict',
+    }),
     verdict: Schema.enumString({
       enum: ['scam', 'suspicious', 'safe'],
       description: 'Overall verdict on whether the message is a scam',
@@ -41,23 +55,12 @@ export const SCAM_RESULT_SCHEMA = Schema.object({
         'other',
         'none',
       ],
-      description: 'The specific scam category, or "none" for safe messages',
-    }),
-    redFlags: Schema.array({
-      items: Schema.string({ description: 'A short phrase describing one red flag' }),
-      maxItems: 3,
-      description: 'Up to 3 red flags found in the message (empty array for safe messages)',
-    }),
-    summary: Schema.string({
-      description: 'One short sentence explaining the verdict',
-    }),
-    advice: Schema.string({
-      description: 'One or two plain-English sentences on what the recipient should do',
+      description: 'Specific scam category, or "none" for safe messages',
     }),
   },
 });
 
-// Pass this object directly to generateContent as `generationConfig`.
+// Pass directly to generateContent / generateContentStream as `generationConfig`.
 export const SCAM_CHECK_GENERATION_CONFIG = {
   responseMimeType: 'application/json',
   responseSchema: SCAM_RESULT_SCHEMA,

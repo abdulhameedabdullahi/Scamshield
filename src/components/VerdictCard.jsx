@@ -1,11 +1,17 @@
 // VerdictCard — displays the structured result from checkMessage().
 //
+// Props:
+//   result         — result object from checkMessage/onDeviceCheck/cloudCheck
+//   originalText   — the original message text (used for inline highlighting)
+//   onSecondOpinion — callback to request cloud second opinion (optional)
+//
 // Colour scheme:
 //   scam       → red
 //   suspicious → amber
 //   safe       → green
 
-import { REPORTING_TIPS } from '../config';
+import { REPORTING_TIPS, ADVICE_BY_CATEGORY } from '../config';
+import HighlightedMessage from './HighlightedMessage';
 
 const VERDICT_CONFIG = {
   scam: {
@@ -54,28 +60,24 @@ const CONFIDENCE_LABELS = {
   low:    'Low confidence',
 };
 
-/**
- * Derive the category display label shown in the header.
- * - safe + none → "Legitimate message"
- * - scam/suspicious + none → "Other suspicious message"
- * - scam/suspicious + known category → that category's label
- */
 function getCategoryLabel(verdict, category) {
-  if (verdict === 'safe') {
-    return 'Legitimate message';
-  }
-  if (category === 'none') {
-    return 'Other suspicious message';
-  }
+  if (verdict === 'safe') return 'Legitimate message';
+  if (category === 'none') return 'Other suspicious message';
   return CATEGORY_LABELS[category] ?? category;
 }
 
-export default function VerdictCard({ result }) {
+export default function VerdictCard({ result, originalText, onSecondOpinion }) {
   const cfg = VERDICT_CONFIG[result.verdict] ?? VERDICT_CONFIG.suspicious;
   const categoryLabel = getCategoryLabel(result.verdict, result.category);
   const confidenceLabel = CONFIDENCE_LABELS[result.confidence] ?? result.confidence;
   const isCloud = result.source === 'cloud';
   const isSafe = result.verdict === 'safe';
+
+  // Advice from config — keyed by category, fallback to 'other'
+  const advice = ADVICE_BY_CATEGORY[result.category] ?? ADVICE_BY_CATEGORY.other;
+
+  // Highlights for HighlightedMessage: use flags that have valid start/end positions
+  const highlights = (result.redFlags ?? []).filter((f) => f.start >= 0);
 
   return (
     <div style={{ ...styles.card, background: cfg.bg, border: `1px solid ${cfg.border}` }}>
@@ -91,9 +93,24 @@ export default function VerdictCard({ result }) {
 
       {/* Body */}
       <div style={{ ...styles.body, color: cfg.bodyText }}>
-        {/* Summary + confidence */}
-        <p style={styles.summary}>{result.summary}</p>
+        {/* Explanation + confidence */}
+        <p style={styles.summary}>{result.explanation}</p>
         <p style={styles.confidence}>{confidenceLabel}</p>
+
+        {/* Highlighted original text — shows which phrases triggered the flags */}
+        {originalText && (
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>Message</div>
+            <div style={{ ...styles.messageBox, borderColor: cfg.border }}>
+              <HighlightedMessage text={originalText} highlights={highlights} />
+            </div>
+            {highlights.length > 0 && (
+              <p style={styles.highlightHint}>
+                Hover highlighted phrases to see why they were flagged.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Red flags — only shown for scam/suspicious */}
         {result.redFlags && result.redFlags.length > 0 && (
@@ -101,16 +118,28 @@ export default function VerdictCard({ result }) {
             <div style={styles.sectionTitle}>Red flags</div>
             <ul style={styles.flagList}>
               {result.redFlags.map((flag, i) => (
-                <li key={i} style={styles.flagItem}>{flag}</li>
+                <li key={i} style={styles.flagItem}>
+                  <span style={styles.flagPhrase}>
+                    &ldquo;{flag.phrase}&rdquo;
+                  </span>
+                  {flag.reason && (
+                    <span style={styles.flagReason}> — {flag.reason}</span>
+                  )}
+                  {flag.source && (
+                    <span style={styles.flagSource}>
+                      {' '}({flag.source === 'rule' ? 'rule' : 'AI'})
+                    </span>
+                  )}
+                </li>
               ))}
             </ul>
           </div>
         )}
 
-        {/* AI-generated advice */}
+        {/* Per-category advice from config (replaces AI-generated advice) */}
         <div style={styles.section}>
           <div style={styles.sectionTitle}>{isSafe ? 'Note' : 'Advice'}</div>
-          <p style={styles.advice}>{result.advice}</p>
+          <p style={styles.advice}>{advice}</p>
         </div>
 
         {/* Static reporting tips — only for scam/suspicious */}
@@ -122,6 +151,20 @@ export default function VerdictCard({ result }) {
                 <li key={i} style={styles.reportingItem}>{tip}</li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Second opinion button — shown when needsSecondOpinion and callback provided */}
+        {result.needsSecondOpinion && onSecondOpinion && (
+          <div style={styles.secondOpinionRow}>
+            <button
+              style={styles.secondOpinionBtn}
+              onClick={onSecondOpinion}
+              type="button"
+            >
+              Not sure? Get a second opinion from the cloud
+              <span style={styles.secondOpinionNote}> (personal details masked)</span>
+            </button>
           </div>
         )}
 
@@ -193,6 +236,18 @@ const styles = {
     marginBottom: 6,
     opacity: 0.7,
   },
+  messageBox: {
+    padding: '10px 12px',
+    background: 'rgba(0,0,0,0.03)',
+    borderRadius: 6,
+    border: '1px solid',
+  },
+  highlightHint: {
+    margin: '4px 0 0',
+    fontSize: '0.75rem',
+    opacity: 0.6,
+    fontStyle: 'italic',
+  },
   flagList: {
     margin: 0,
     paddingLeft: 18,
@@ -200,7 +255,17 @@ const styles = {
   flagItem: {
     fontSize: '0.875rem',
     lineHeight: 1.6,
-    marginBottom: 2,
+    marginBottom: 4,
+  },
+  flagPhrase: {
+    fontWeight: 600,
+  },
+  flagReason: {
+    opacity: 0.85,
+  },
+  flagSource: {
+    fontSize: '0.75rem',
+    opacity: 0.55,
   },
   advice: {
     margin: 0,
@@ -221,6 +286,24 @@ const styles = {
     fontSize: '0.82rem',
     lineHeight: 1.7,
     marginBottom: 2,
+  },
+  secondOpinionRow: {
+    marginBottom: 14,
+  },
+  secondOpinionBtn: {
+    padding: '7px 14px',
+    fontSize: '0.82rem',
+    fontWeight: 600,
+    background: 'transparent',
+    border: '1px solid currentColor',
+    borderRadius: 6,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    opacity: 0.75,
+  },
+  secondOpinionNote: {
+    fontWeight: 400,
+    opacity: 0.8,
   },
   footer: {
     display: 'flex',

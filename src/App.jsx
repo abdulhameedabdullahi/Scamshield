@@ -35,6 +35,12 @@ export default function App() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [charsReceived, setCharsReceived] = useState(0);
 
+  // ── Second opinion state ───────────────────────────────────────────────────
+  // 'idle' | 'consent_pending' | 'checking' | 'done' | 'error'
+  const [secondOpinionState, setSecondOpinionState] = useState('idle');
+  const [secondResult, setSecondResult] = useState(null);
+  const [secondErrorMsg, setSecondErrorMsg] = useState('');
+
   // Tick elapsed time every 100 ms while a check is running
   useEffect(() => {
     if (!checkStartTime) return;
@@ -48,9 +54,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // When the model is already on-device, pre-create the Chrome session so
-    // the first real check doesn't pay the cold-start cost (~5-10 s).
-    // No user gesture needed when availability is 'available' (no download triggered).
     if (availability === 'available') {
       warmUpDeviceModel();
     }
@@ -77,6 +80,10 @@ export default function App() {
       setResult(null);
       setErrorMsg('');
     }
+    // Clear second opinion when text changes
+    setSecondOpinionState('idle');
+    setSecondResult(null);
+    setSecondErrorMsg('');
   }
 
   function handleClear() {
@@ -84,6 +91,9 @@ export default function App() {
     setAppState('idle');
     setResult(null);
     setErrorMsg('');
+    setSecondOpinionState('idle');
+    setSecondResult(null);
+    setSecondErrorMsg('');
   }
 
   // ── Main check entry point ─────────────────────────────────────────────────
@@ -93,6 +103,9 @@ export default function App() {
     setAppState('checking');
     setResult(null);
     setErrorMsg('');
+    setSecondOpinionState('idle');
+    setSecondResult(null);
+    setSecondErrorMsg('');
     startProgress();
 
     try {
@@ -117,7 +130,7 @@ export default function App() {
     }
   }
 
-  // ── Download & check (must be a click handler → user gesture) ─────────────
+  // ── Download & check ───────────────────────────────────────────────────────
 
   const handleDownloadAndCheck = useCallback(async () => {
     setAppState('downloading');
@@ -137,7 +150,7 @@ export default function App() {
     }
   }, [text]);
 
-  // ── Pre-download without a pending check ──────────────────────────────────
+  // ── Pre-download ───────────────────────────────────────────────────────────
 
   const handlePreload = useCallback(async () => {
     setAppState('downloading');
@@ -152,7 +165,7 @@ export default function App() {
     }
   }, []);
 
-  // ── Cloud consent path ─────────────────────────────────────────────────────
+  // ── Cloud consent path (first check) ──────────────────────────────────────
 
   async function handleConsent() {
     setAppState('checking');
@@ -175,10 +188,35 @@ export default function App() {
     setAppState('idle');
   }
 
+  // ── Second opinion flow ────────────────────────────────────────────────────
+
+  function handleSecondOpinionRequest() {
+    setSecondOpinionState('consent_pending');
+    setSecondResult(null);
+    setSecondErrorMsg('');
+  }
+
+  async function handleSecondOpinionConsent() {
+    setSecondOpinionState('checking');
+    try {
+      const outcome = await cloudCheck(text, (chars) => setCharsReceived(chars));
+      setSecondResult(outcome);
+      setSecondOpinionState('done');
+    } catch (err) {
+      setSecondErrorMsg(err?.message ?? 'Cloud check failed. Please try again.');
+      setSecondOpinionState('error');
+    }
+  }
+
+  function handleSecondOpinionDecline() {
+    setSecondOpinionState('idle');
+  }
+
   // ── Derived state ──────────────────────────────────────────────────────────
 
   const isChecking = appState === 'checking';
   const isDownloading = appState === 'downloading';
+  const isSecondChecking = secondOpinionState === 'checking';
 
   const checkingLabel = availability === 'available'
     ? 'Analysing privately on your device…'
@@ -202,9 +240,19 @@ export default function App() {
         onDownloadRequest={handlePreload}
       />
 
-      {/* Consent gate */}
+      {/* Consent gate — first cloud check */}
       {appState === 'needs_consent' && (
         <ConsentDialog onConsent={handleConsent} onDecline={handleDecline} />
+      )}
+
+      {/* Consent gate — second opinion */}
+      {secondOpinionState === 'consent_pending' && (
+        <div style={styles.secondConsentWrap}>
+          <ConsentDialog
+            onConsent={handleSecondOpinionConsent}
+            onDecline={handleSecondOpinionDecline}
+          />
+        </div>
       )}
 
       {/* Message input */}
@@ -217,10 +265,12 @@ export default function App() {
       />
 
       {/* Live progress indicator while checking */}
-      {isChecking && (
+      {(isChecking || isSecondChecking) && (
         <div style={styles.progressBox}>
           <span style={styles.progressDot} />
-          <span style={styles.progressText}>{checkingLabel}</span>
+          <span style={styles.progressText}>
+            {isSecondChecking ? 'Getting second opinion via cloud…' : checkingLabel}
+          </span>
           <span style={styles.progressStats}>
             {charsReceived > 0 && `${charsReceived} chars · `}
             {(elapsedMs / 1000).toFixed(1)}s
@@ -258,10 +308,29 @@ export default function App() {
         </div>
       )}
 
-      {/* Result */}
+      {/* Main result */}
       {appState === 'done' && result && (
         <div style={styles.resultWrap}>
-          <VerdictCard result={result} />
+          <VerdictCard
+            result={result}
+            originalText={text}
+            onSecondOpinion={secondOpinionState === 'idle' ? handleSecondOpinionRequest : undefined}
+          />
+        </div>
+      )}
+
+      {/* Second opinion error */}
+      {secondOpinionState === 'error' && secondErrorMsg && (
+        <div style={{ ...styles.errorBox, marginTop: 12 }}>
+          <strong>Second opinion error: </strong>{secondErrorMsg}
+        </div>
+      )}
+
+      {/* Second opinion result */}
+      {secondOpinionState === 'done' && secondResult && (
+        <div style={styles.secondResultWrap}>
+          <div style={styles.secondResultHeader}>Second opinion from cloud</div>
+          <VerdictCard result={secondResult} originalText={text} />
         </div>
       )}
 
@@ -394,6 +463,20 @@ const styles = {
   },
   resultWrap: {
     marginTop: 20,
+  },
+  secondConsentWrap: {
+    marginTop: 12,
+  },
+  secondResultWrap: {
+    marginTop: 20,
+  },
+  secondResultHeader: {
+    fontSize: '0.82rem',
+    fontWeight: 700,
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    marginBottom: 8,
   },
   devSection: {
     marginTop: 48,

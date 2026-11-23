@@ -39,15 +39,23 @@ ScamShield is a **private, offline-first scam checker** that runs directly in Ch
 
 ## How Hybrid Inference Works in ScamShield
 
-| Feature | Runs | Inference Mode | Why |
-|---|---|---|---|
-| Scam check — on-device path | On-device (Gemini Nano) | `ONLY_ON_DEVICE` | Private, offline-capable. Raw text never leaves device. |
-| Scam check — cloud path (consent-gated) | Cloud (Gemini) | `ONLY_IN_CLOUD` | Only after explicit user consent; phone/account numbers masked by regex first. |
-| Personal data masking | On-device only + regex safety net | `ONLY_ON_DEVICE` | Raw private text must **never** leave the device under any circumstances. |
-| Deep investigation + Google Search grounding | Cloud (Gemini) | `ONLY_IN_CLOUD` | Needs live web search and tools; only receives already-masked text. (🚧) |
-| Follow-up chat | Cloud | `ONLY_IN_CLOUD` | Multi-turn chat is a cloud capability. (🚧) |
-| Non-English messages (Pidgin, Hausa, Yoruba) | Cloud | `ONLY_IN_CLOUD` | Gemini Nano officially supports en/es/ja/de/fr; other languages route to cloud. (🚧) |
-| Devices without Gemini Nano | Regex masking + explicit user consent before cloud check | `ONLY_IN_CLOUD` | Graceful degradation with informed consent. |
+ScamShield uses a **Rules + AI** hybrid architecture designed for the limited capabilities of Gemini Nano (a small on-device model):
+
+1. **Rule engine runs first** (`src/ai/rules.js`) — pure JS, no network. Detects 10 signal types (links, credential requests, urgency, etc.) and 3 safe cues (do-not-share warnings, masked account numbers, standard alert structure). Returns `{ signals, ruleScore }`.
+2. **Signals injected into prompt** — the AI sees what patterns the rule engine already found, so it focuses on reasoning rather than pattern-matching from scratch.
+3. **AI outputs in reasoning-first order** — schema enforces `redFlags → explanation → verdict → confidence → category` so Gemini Nano must cite evidence before committing to a verdict.
+4. **Evidence check** — any AI-flagged phrase that doesn't appear in the actual message is dropped (hallucination prevention).
+5. **Verdict consistency overrides** — deterministic post-processing catches contradictions (e.g. "scam" with zero evidence → downgraded to "suspicious").
+6. **Second opinion** — when the result is "suspicious" or low-confidence, the user can opt in to a cloud check; personal details are masked before leaving the device.
+
+| Step | Where | Inference Mode | Privacy guarantee |
+|------|-------|---------------|-------------------|
+| Rule engine | On-device (pure JS) | — | No network at all |
+| Scam check — on-device | Gemini Nano | `ONLY_ON_DEVICE` | Raw text stays on device |
+| Scam check — second opinion | Cloud (Gemini) | `ONLY_IN_CLOUD` | Explicit consent + regex masking first |
+| Personal data masking | On-device only | `ONLY_ON_DEVICE` | Raw PII **never** leaves the device |
+| Deep investigation | Cloud | `ONLY_IN_CLOUD` | Masked text only (🚧) |
+| Devices without Gemini Nano | Cloud (consent-gated) | `ONLY_IN_CLOUD` | Explicit consent + masking; informed degradation |
 
 ---
 
@@ -92,10 +100,12 @@ flowchart TD
 - ✅ App Check with reCAPTCHA Enterprise (dev debug token support)
 - ✅ Regex-based PII masker (phone, email, account numbers, BVN/NIN, card numbers)
 - ✅ On-device availability detection (`LanguageModel.availability()`)
-- ✅ **Scam check feature** — structured JSON output (verdict, confidence, category, redFlags, summary, advice)
+- ✅ **Rules + AI hybrid** — rule engine provides grounded signals; AI reasons about them; evidence check prevents hallucinated red flags
+- ✅ **Scam check feature** — structured JSON output (verdict, confidence, category, redFlags with phrase+reason, explanation)
 - ✅ **Explicit hybrid routing** — on-device → download prompt → cloud (consent-gated); no silent fallbacks
-- ✅ **Full production UI** — ModelStatus, MessageInput, VerdictCard, ConsentDialog components
-- ✅ **Developer test harness** — 14 synthetic test messages (9 scam types + 5 legit), accuracy reporting
+- ✅ **Second opinion flow** — cloud check offered for suspicious/low-confidence verdicts; consent-gated; PII masked first
+- ✅ **Full production UI** — ModelStatus, MessageInput, VerdictCard (with inline phrase highlights), ConsentDialog components
+- ✅ **Developer test harness** — 18 synthetic test messages (9 scam types + 5 legit + 4 edge cases), FP/FN tracking, markdown export
 - 🚧 On-device PII masking with Gemini Nano (regex masking is active; AI-enhanced masking planned)
 - 🚧 Deep investigation with Google Search grounding
 - 🚧 Multi-turn follow-up chat

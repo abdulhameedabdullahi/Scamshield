@@ -73,31 +73,36 @@ any cloud call. The user always knows where their text goes.
 ```
 src/
   firebase.js           ← Firebase app init + App Check + getAI → exports app, ai
-  config.js             ← CLOUD_MODEL, APP_NAME constants
+  config.js             ← CLOUD_MODEL, APP_NAME, REPORTING_TIPS, ADVICE_BY_CATEGORY constants
   ai/
     models.js           ← Creates & exports: onDeviceModel, cloudModel (2 models only — no PREFER_ON_DEVICE)
     availability.js     ← getOnDeviceAvailability(), initDeviceModel() helpers
     regexMask.js        ← Standalone PII regex masker: regexMask(text) — no AI, runs synchronously
     maskMessage.js      ← maskMessage(text) — imports from regexMask.js; NEVER falls back to cloud
-    prompts.js          ← buildScamCheckPrompt(messageText, scamTrends?) — single-string prompt builder
-    schemas.js          ← SCAM_RESULT_SCHEMA (Schema.object), SCAM_CHECK_GENERATION_CONFIG
-    checkMessage.js     ← Explicit routing: checkMessage(), onDeviceCheck(), cloudCheck(),
-                           downloadAndCheck(), preloadDeviceModel(), parseCheckResult()
+    rules.js            ← analyzeSignals(text) → { signals, ruleScore } — pure JS rule engine
+    prompts.js          ← buildScamCheckPrompt(text, signals?, scamTrends?) — prompt with signal injection
+    schemas.js          ← SCAM_RESULT_SCHEMA (reasoning-first field order), SCAM_CHECK_GENERATION_CONFIG
+    checkMessage.js     ← Routing + rules+AI flow: checkMessage(), onDeviceCheck(), cloudCheck(),
+                           downloadAndCheck(), preloadDeviceModel(), warmUpDeviceModel(), parseCheckResult()
     investigate.js      ← Stub: investigate(maskedText) — ONLY_IN_CLOUD (TODO)
   services/
     reports.js          ← Stub: Firestore community reports (TODO)
   components/
     ModelStatus.jsx     ← On-device availability banner + pre-download button with progress bar
     MessageInput.jsx    ← Textarea, Check button, Clear button, char counter (2000 max)
-    VerdictCard.jsx     ← Colour-coded result card (red/amber/green), source badge, masked preview
+    VerdictCard.jsx     ← Result card with inline phrase highlighting, advice from config, second opinion button
+    HighlightedMessage.jsx ← Renders text with coloured underline highlights and hover tooltips
     ConsentDialog.jsx   ← Inline consent UI for the cloud check path
     DevTestPanel.jsx    ← Dev test UI: availability status + on-device/cloud hello-world buttons
   dev/
-    testMessages.js     ← 14 synthetic test messages (9 scams, 5 legit) with expected verdicts
-    TestRunner.jsx      ← Batch test runner table: expected vs actual, accuracy %, timing
-  App.jsx               ← Full app UI; DevTestPanel + TestRunner behind "Developer tools" toggle
+    testMessages.js     ← 18 synthetic test messages (IDs 1-18); expected may be array
+    TestRunner.jsx      ← Batch test runner: FP/FN tracking, Export button for eval markdown
+  App.jsx               ← Full app UI; second opinion flow; DevTestPanel + TestRunner behind toggle
   main.jsx              ← Vite entry point (unchanged from template)
   index.css             ← Global styles (cleaned up from Vite template)
+docs/
+  eval-baseline.md      ← Template for v1 baseline results (populate by running TestRunner)
+  eval-v2.md            ← Template for v2 results (populate after redesign)
 ```
 
 ---
@@ -259,3 +264,73 @@ const finalText = (await streamResult.response).text(); // complete JSON — par
 | Time-to-first-token (perceived) | silent wait | visible counter starts immediately |
 
 **How to measure**: Use TestRunner. Run once — first-run time is the cold-start (minus warm-up). Avg of runs 2-14 is steady-state. Compare before/after a reload (without navigating away) to see warm-up benefit.
+
+---
+
+## Decisions made in session 5 (rules + AI redesign)
+
+**Problem:** Gemini Nano is unreliable at complex multi-field output in one pass — contradictory fields, false positives on casual messages, hallucinated red-flag phrases not present in the message.
+
+**Solution:** RULES + AI hybrid architecture.
+
+### New architecture
+
+| Step | File | What it does |
+|------|------|-------------|
+| 1. Rule engine | `src/ai/rules.js` | Pure JS, synchronous. Detects 10 signal types + 3 safe cues. Returns `{ signals, ruleScore }`. |
+| 2. Build prompt | `src/ai/prompts.js` | Injects signals into prompt; wraps message in `<<<MESSAGE…MESSAGE>>>` delimiters; 4 few-shot examples. |
+| 3. AI reasoning | on-device / cloud | Sees message + signals. Schema forces reasoning-first field order: `redFlags → explanation → verdict → confidence → category`. |
+| 4. Evidence check | `checkMessage.js` | Drops AI red flags whose `phrase` doesn't exist in the analyzed text (hallucination prevention). |
+| 5. Merge + override | `checkMessage.js` | Merges rule signals as additional red flags (deduplicated). Applies verdict overrides. |
+
+### Signal types
+- **Positive (risk):** `link` (+3), `credential_request` (+4), `payment_request` (+3), `account_number` (+1), `phone_number` (+1), `urgency` (+2), `threat_or_block` (+2), `prize_or_offer` (+2), `impersonation` (+3), `ai_instruction` (+5)
+- **Negative (safe cues):** `do_not_share` (-4), `masked_account` (-3), `standard_alert` (-2, compound: detected when no link/credential found and standard alert fields present)
+
+### Verdict consistency overrides
+1. **Prompt injection**: `ai_instruction` signal detected → upgrade safe to suspicious; ensure the injection phrase appears in redFlags.
+2. **Hallucinated scam**: `verdict==='scam'` with 0 verified evidence AND `ruleScore < 2` → downgrade to suspicious.
+3. **Missed risk**: `verdict==='safe'` with 0 AI evidence but ≥2 rule flags AND `ruleScore ≥ 6` → upgrade to suspicious.
+4. **Safe enforcement**: safe verdict always forces `category='none'` and `redFlags=[]`.
+
+### Schema change (v1 → v2)
+| Field | v1 | v2 |
+|-------|----|----|
+| `redFlags` | `string[]` | `{phrase: string, reason: string}[]` |
+| `summary` | one sentence | removed (replaced by `explanation`) |
+| `explanation` | — | new: one sentence explaining verdict |
+| `advice` | AI-generated | removed from AI schema; now `ADVICE_BY_CATEGORY` from config |
+| Field order | verdict first | `redFlags → explanation → verdict → confidence → category` (reasoning-first) |
+
+### New return shape from checkMessage / onDeviceCheck / cloudCheck
+```js
+{
+  verdict,         // 'scam' | 'suspicious' | 'safe'
+  confidence,      // 'low' | 'medium' | 'high'
+  category,        // 12 enum values | 'none'
+  redFlags,        // [{phrase, reason, source: 'ai'|'rule', start, end}] — start/end for highlighting
+  explanation,     // one sentence
+  signals,         // full signal array from analyzeSignals()
+  source,          // 'on-device' | 'cloud'
+  durationMs,
+  needsSecondOpinion,  // true when verdict==='suspicious' || confidence==='low'
+  maskedText?,     // cloud path only
+}
+```
+
+### New and updated files
+- **`src/ai/rules.js`** (NEW) — `analyzeSignals(text)` → `{ signals, ruleScore }`
+- **`src/ai/schemas.js`** (UPDATED) — new nested redFlags schema; removed summary/advice
+- **`src/ai/prompts.js`** (UPDATED) — `buildScamCheckPrompt(text, signals, scamTrends?)` with 4 few-shot examples and signal injection
+- **`src/ai/checkMessage.js`** (UPDATED) — imports `analyzeSignals`; full evidence check + consistency logic; `needsSecondOpinion` flag
+- **`src/config.js`** (UPDATED) — added `ADVICE_BY_CATEGORY` per-category static advice
+- **`src/components/HighlightedMessage.jsx`** (NEW) — char-level highlighting; underline + colour; hover shows reason
+- **`src/components/VerdictCard.jsx`** (UPDATED) — shows `explanation`; `{phrase,reason}` redFlags; `ADVICE_BY_CATEGORY` advice; `HighlightedMessage`; second opinion button when `needsSecondOpinion`
+- **`src/App.jsx`** (UPDATED) — second opinion flow: separate state machine, consent gate, side-by-side result display
+- **`src/dev/testMessages.js`** (UPDATED) — 4 new messages (IDs 15-18): prompt injection, Pidgin scam, Pidgin safe, ambiguous job inquiry. `expected` and `expectedCategory` now accept arrays.
+- **`src/dev/TestRunner.jsx`** (UPDATED) — supports array `expected`; tracks FP/FN; "Export" button generates markdown for eval files
+- **`docs/eval-baseline.md`** (NEW) — template for v1 baseline results
+- **`docs/eval-v2.md`** (NEW) — template for v2 results
+
+### Notes on temperature/topK
+Checked `@firebase/ai` type definitions: `temperature` and `topK` exist in `LanguageModelCreateCoreOptions` but are marked `@deprecated`. They were NOT set — deprecated fields may behave inconsistently across Chrome versions.

@@ -5,10 +5,14 @@
 //
 // Timing reported:
 //   - Warm-up time (session creation + tiny inference)
-//   - First-run time (message #1 — often slower as the model settles in memory)
-//   - Average time for messages #2-14 (represents steady-state performance)
+//   - First-run time (message #1 — often slower as the model settles)
+//   - Average time for messages #2–N (steady-state performance)
 //
-// Uses onDeviceCheck() directly (no routing overhead per test).
+// `expected` may be a string or an array of acceptable verdicts.
+// `expectedCategory` may also be an array for ambiguous test cases.
+//
+// False positives (FP): safe message marked scam/suspicious
+// False negatives (FN): scam message marked safe
 
 import { useState } from 'react';
 import { onDeviceCheck, warmUpDeviceModel } from '../ai/checkMessage';
@@ -22,12 +26,14 @@ export default function TestRunner() {
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [warmupMs, setWarmupMs] = useState(null);
   const [error, setError] = useState('');
+  const [exportText, setExportText] = useState('');
 
   async function runTests() {
     setStatus(STATUS.warming);
     setRows([]);
     setWarmupMs(null);
     setError('');
+    setExportText('');
 
     // ── Warm-up step ──────────────────────────────────────────────────────────
     const warmStart = Date.now();
@@ -51,18 +57,41 @@ export default function TestRunner() {
       try {
         const result = await onDeviceCheck(msg.text);
         const elapsed = Date.now() - start;
-        const verdictMatch = result.verdict === msg.expected;
-        const categoryMatch = result.category === msg.expectedCategory;
+
+        const verdictMatch = Array.isArray(msg.expected)
+          ? msg.expected.includes(result.verdict)
+          : result.verdict === msg.expected;
+
+        const categoryMatch = Array.isArray(msg.expectedCategory)
+          ? msg.expectedCategory.includes(result.category)
+          : result.category === msg.expectedCategory;
+
+        // FP: a safe message was flagged as scam or suspicious
+        const expectedIsSafe = Array.isArray(msg.expected)
+          ? msg.expected.every((e) => e === 'safe')
+          : msg.expected === 'safe';
+        const isFP = expectedIsSafe && (result.verdict === 'scam' || result.verdict === 'suspicious');
+
+        // FN: a scam message was classified as safe
+        const expectedIsScam = Array.isArray(msg.expected)
+          ? msg.expected.some((e) => e === 'scam' || e === 'suspicious')
+          : (msg.expected === 'scam' || msg.expected === 'suspicious');
+        const isFN = expectedIsScam && result.verdict === 'safe';
+
         row = {
           id: msg.id,
           label: msg.label,
-          expected: msg.expected,
+          expected: Array.isArray(msg.expected) ? msg.expected.join('/') : msg.expected,
           actual: result.verdict,
-          expectedCategory: msg.expectedCategory,
+          expectedCategory: Array.isArray(msg.expectedCategory)
+            ? msg.expectedCategory.join('/')
+            : msg.expectedCategory,
           actualCategory: result.category,
           confidence: result.confidence,
           verdictMatch,
           categoryMatch,
+          isFP,
+          isFN,
           durationMs: result.durationMs ?? elapsed,
           error: null,
         };
@@ -70,13 +99,17 @@ export default function TestRunner() {
         row = {
           id: msg.id,
           label: msg.label,
-          expected: msg.expected,
+          expected: Array.isArray(msg.expected) ? msg.expected.join('/') : msg.expected,
           actual: '—',
-          expectedCategory: msg.expectedCategory,
+          expectedCategory: Array.isArray(msg.expectedCategory)
+            ? msg.expectedCategory.join('/')
+            : msg.expectedCategory,
           actualCategory: '—',
           confidence: '—',
           verdictMatch: false,
           categoryMatch: false,
+          isFP: false,
+          isFN: false,
           durationMs: Date.now() - start,
           error: err?.message ?? String(err),
         };
@@ -94,6 +127,8 @@ export default function TestRunner() {
   const verdictCorrect = rows.filter((r) => r.verdictMatch).length;
   const categoryCorrect = rows.filter((r) => r.categoryMatch && !r.error).length;
   const totalDone = rows.length;
+  const fpCount = rows.filter((r) => r.isFP).length;
+  const fnCount = rows.filter((r) => r.isFN).length;
   const verdictAccuracy = totalDone > 0 ? Math.round((verdictCorrect / totalDone) * 100) : null;
 
   const firstRunMs = rows[0]?.durationMs ?? null;
@@ -104,6 +139,35 @@ export default function TestRunner() {
 
   const isRunning = status === STATUS.running || status === STATUS.warming;
 
+  // ── Export to markdown ─────────────────────────────────────────────────────
+  function handleExport() {
+    const lines = [
+      `## ScamShield Eval Results`,
+      ``,
+      `| # | Label | Expected | Actual | Category | Conf | Time |`,
+      `|---|-------|----------|--------|----------|------|------|`,
+    ];
+
+    for (const r of rows) {
+      const v = r.verdictMatch ? '✓' : r.error ? 'ERR' : '✗';
+      const c = r.categoryMatch ? '✓' : r.error ? '—' : '✗';
+      lines.push(
+        `| ${r.id} | ${r.label} | ${r.expected} | ${r.actual} ${v} | ${r.actualCategory} ${c} | ${r.confidence} | ${r.durationMs.toLocaleString()} ms |`
+      );
+    }
+
+    lines.push(``);
+    lines.push(`**Verdict accuracy:** ${verdictAccuracy}% (${verdictCorrect}/${totalDone})`);
+    lines.push(`**Category accuracy:** ${categoryCorrect}/${totalDone}`);
+    lines.push(`**False positives:** ${fpCount}`);
+    lines.push(`**False negatives:** ${fnCount}`);
+    if (warmupMs != null) lines.push(`**Warm-up:** ${warmupMs.toLocaleString()} ms`);
+    if (firstRunMs != null) lines.push(`**First run:** ${firstRunMs.toLocaleString()} ms`);
+    if (avgRestMs != null) lines.push(`**Avg (runs 2–${totalDone}):** ${avgRestMs.toLocaleString()} ms`);
+
+    setExportText(lines.join('\n'));
+  }
+
   return (
     <div style={styles.wrap}>
       <div style={styles.header}>
@@ -112,9 +176,17 @@ export default function TestRunner() {
           {status === STATUS.done && (
             <span style={styles.accuracy}>
               {verdictAccuracy}% verdict ({verdictCorrect}/{totalDone})
-              {' · '}
-              {categoryCorrect}/{totalDone} category
+              {' · '}FP: {fpCount} · FN: {fnCount}
             </span>
+          )}
+          {status === STATUS.done && (
+            <button
+              style={styles.exportBtn}
+              onClick={handleExport}
+              type="button"
+            >
+              Export
+            </button>
           )}
           <button
             style={{ ...styles.runBtn, ...(isRunning ? styles.runBtnDisabled : {}) }}
@@ -160,7 +232,7 @@ export default function TestRunner() {
                 <th style={styles.th}>Expected</th>
                 <th style={styles.th}>Actual</th>
                 <th style={styles.th}>Category match</th>
-                <th style={styles.th}>Confidence</th>
+                <th style={styles.th}>Conf</th>
                 <th style={styles.th}>Time</th>
               </tr>
             </thead>
@@ -179,6 +251,8 @@ export default function TestRunner() {
                     {row.error
                       ? <span style={styles.errorCell} title={row.error}>ERR</span>
                       : <VerdictPill v={row.actual} match={row.verdictMatch} />}
+                    {row.isFP && <span style={styles.fpTag} title="False positive"> FP</span>}
+                    {row.isFN && <span style={styles.fnTag} title="False negative"> FN</span>}
                   </td>
                   <td style={styles.td}>
                     <span style={row.categoryMatch ? styles.categoryPass : styles.categoryFail}>
@@ -199,17 +273,33 @@ export default function TestRunner() {
           </table>
         </div>
       )}
+
+      {/* Export textarea */}
+      {exportText && (
+        <div style={styles.exportWrap}>
+          <div style={styles.exportLabel}>Copy and paste into docs/eval-baseline.md or docs/eval-v2.md:</div>
+          <textarea
+            style={styles.exportArea}
+            value={exportText}
+            readOnly
+            onClick={(e) => e.target.select()}
+            rows={Math.min(exportText.split('\n').length + 1, 20)}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 function VerdictPill({ v, match }) {
+  // Handle "safe/suspicious" combined strings from array expected
+  const base = typeof v === 'string' ? v.split('/')[0] : v;
   const colors = {
     scam:       { bg: '#fee2e2', text: '#991b1b' },
     suspicious: { bg: '#fef3c7', text: '#92400e' },
     safe:       { bg: '#dcfce7', text: '#166534' },
   };
-  const c = colors[v] ?? { bg: '#f3f4f6', text: '#6b7280' };
+  const c = colors[base] ?? { bg: '#f3f4f6', text: '#6b7280' };
   const outline = match === false ? '2px solid #ef4444' : match === true ? '2px solid #22c55e' : 'none';
   return (
     <span style={{
@@ -246,7 +336,7 @@ const styles = {
   headerRight: {
     display: 'flex',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     flexWrap: 'wrap',
   },
   title: {
@@ -259,6 +349,17 @@ const styles = {
     fontSize: '0.82rem',
     color: '#374151',
     fontWeight: 600,
+  },
+  exportBtn: {
+    padding: '7px 12px',
+    fontSize: '0.82rem',
+    fontWeight: 600,
+    background: '#f3f4f6',
+    color: '#374151',
+    border: '1px solid #d1d5db',
+    borderRadius: 6,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
   },
   runBtn: {
     padding: '7px 16px',
@@ -331,4 +432,25 @@ const styles = {
   errorCell: { color: '#dc2626', fontWeight: 600, cursor: 'help' },
   firstRunCell: { fontWeight: 600 },
   firstRunTag: { fontSize: '0.72rem', color: '#6b7280', fontWeight: 400 },
+  fpTag: { fontSize: '0.72rem', color: '#dc2626', fontWeight: 700 },
+  fnTag: { fontSize: '0.72rem', color: '#9a3412', fontWeight: 700 },
+  exportWrap: {
+    marginTop: 16,
+  },
+  exportLabel: {
+    fontSize: '0.78rem',
+    color: '#6b7280',
+    marginBottom: 6,
+  },
+  exportArea: {
+    width: '100%',
+    fontFamily: 'monospace',
+    fontSize: '0.75rem',
+    padding: '10px',
+    border: '1px solid #d1d5db',
+    borderRadius: 6,
+    background: '#f9fafb',
+    resize: 'vertical',
+    boxSizing: 'border-box',
+  },
 };
