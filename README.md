@@ -154,7 +154,8 @@ flowchart TD
 - ✅ **SendPreview** — user reviews detected entities as chips before any cloud call; can toggle each entity between masked/kept. `onSend(maskedText)` only receives the masked string.
 - ✅ **ScamShield Agent** — function-calling agent loop: `analyze_link` (local heuristics), `check_community_reports` (Firestore + mock), `search_web` (separate grounded call, since Google Search + function declarations cannot combine in one request), `get_scam_trends` (Remote Config). Max 6 tool-call steps. Final answer as structured JSON with evidence, technique, next steps.
 - ✅ **AgentPanel** — live step timeline showing each tool call + result + duration; final verdict card with evidence tagged by source; follow-up chat with auto regex masking
-- ✅ **Full production UI** — ModelStatus, MessageInput, VerdictCard (with inline phrase highlights), SendPreview, InvestigationPanel
+- ✅ **Redesigned UI (session 9)** — chat-bubble interface (plum brand, Bricolage Grotesque + Atkinson Hyperlegible), TopBar with ≡ menu, pinned Composer, animated verdict bubble, PrivacyPage, AboutPage, restyled Dashboard, new Logo SVG (bubble→shield shape)
+- ✅ **Full production UI** — ModelStatus (friendly single line), MessageInput (composer with clipboard paste), VerdictCard (verdict bubble with checklist), SendPreview ("Before we search online" sheet), AgentPanel (typing bubbles)
 - ✅ **Developer test harness** — 20 synthetic test messages, FP/FN tracking, markdown/JSON export, 4 inference modes (AI-only / Rules+AI / Cloud / Hybrid)
 - ✅ **In-app accuracy dashboard** (`#/accuracy`) — comparison chart, per-message table, live run
 - 🚧 Screenshot / image input (OCR via Gemini Nano)

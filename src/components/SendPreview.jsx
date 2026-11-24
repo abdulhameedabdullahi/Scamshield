@@ -1,15 +1,6 @@
-// SendPreview — shows detected PII entities as chips so the user can review
-// and toggle what gets masked before any cloud call is made.
+// SendPreview — "Before we search online" masking review sheet.
 //
-// Props:
-//   originalText  — raw message text
-//   entities      — from detectEntities(): [{text, type, start, end, source, defaultAction}]
-//   regexOnly     — true when on-device AI was unavailable (regex masking only)
-//   onSend        — (maskedText) => void  called when user confirms
-//   onCancel      — () => void
-//
-// Security: placeholderMap (original values) is computed inside this component and
-// never passed out. onSend only receives the masked string.
+// Props: originalText, entities, regexOnly, onSend, onCancel
 
 import { useState, useMemo } from 'react';
 import { buildMaskedText } from '../ai/maskMessage';
@@ -18,295 +9,244 @@ import { MASK_POLICY, MASK_POLICY_LABELS, PLACEHOLDER_TYPES } from '../config';
 export default function SendPreview({ originalText, entities, regexOnly, onSend, onCancel }) {
   const [overrides, setOverrides] = useState({});
 
-  // Current action for each entity (considering overrides)
   const actions = useMemo(
-    () => entities.map((e, i) => overrides[i] ?? e.defaultAction ?? (MASK_POLICY[e.type] === 'mask' ? 'mask' : 'keep')),
+    () => entities.map((e, i) =>
+      overrides[i] ?? e.defaultAction ?? (MASK_POLICY[e.type] === 'mask' ? 'mask' : 'keep')
+    ),
     [entities, overrides],
   );
 
-  // maskedText + entityPlaceholders (placeholder label per entity, null if kept)
   const { maskedText, entityPlaceholders } = useMemo(
     () => buildMaskedText(originalText, entities, overrides),
     [originalText, entities, overrides],
   );
 
-  const maskedCount = actions.filter((a) => a === 'mask').length;
+  const hiddenItems  = entities.filter((_, i) => actions[i] === 'mask');
+  const keptItems    = entities.filter((_, i) => actions[i] === 'keep');
 
   function toggle(idx) {
     setOverrides((prev) => ({ ...prev, [idx]: actions[idx] === 'mask' ? 'keep' : 'mask' }));
   }
 
-  // Split original text into plain-text and entity segments
-  const segments = buildSegments(originalText, entities);
-
   return (
-    <div style={styles.wrap}>
-      {/* Header */}
-      <div style={styles.header}>
-        <span style={styles.lock}>&#128274;</span>
+    <div style={S.wrap} role="dialog" aria-label="Before we search online">
+      {/* Title */}
+      <div style={S.titleRow}>
+        <span style={S.lockIcon} aria-hidden="true">🔒</span>
         <div>
-          <div style={styles.headerTitle}>
-            {entities.length > 0
-              ? `${maskedCount} personal detail${maskedCount !== 1 ? 's' : ''} detected and masked on your device`
-              : 'No personal details detected'}
-          </div>
+          <h2 style={S.title}>Before we search online</h2>
           {regexOnly && (
-            <div style={styles.regexOnly}>
-              Basic masking only — private AI unavailable on this device.
-            </div>
+            <p style={S.regexNote}>Basic hiding only — private AI unavailable on this phone.</p>
           )}
         </div>
       </div>
 
-      {/* Message with chips */}
-      {entities.length > 0 && (
-        <>
-          <div style={styles.sectionLabel}>Review and tap to toggle:</div>
-          <div style={styles.messageBox}>
-            {segments.map((seg, i) => {
-              if (seg.entityIdx == null) {
-                return <span key={i} style={styles.plainText}>{seg.text}</span>;
-              }
-              const idx = seg.entityIdx;
-              const action = actions[idx];
-              const entity = entities[idx];
-              const placeholder = entityPlaceholders[idx] ?? `[${PLACEHOLDER_TYPES[entity.type] ?? 'ITEM'}]`;
-              const isKept = action === 'keep';
-              const keepLabel = MASK_POLICY_LABELS[entity.type];
+      {/* Hidden items summary */}
+      {hiddenItems.length > 0 && (
+        <div style={S.section}>
+          <div style={S.sectionLabel}>We hid your personal details:</div>
+          <div style={S.chipRow}>
+            {entities.map((e, i) => {
+              if (actions[i] !== 'mask') return null;
+              const ph = entityPlaceholders[i] ?? `[${PLACEHOLDER_TYPES[e.type] ?? 'ITEM'}]`;
               return (
                 <button
                   key={i}
                   type="button"
-                  style={isKept ? styles.chipKept : styles.chipMasked}
-                  title={isKept ? (keepLabel ?? 'Click to mask this') : 'Click to send original value'}
-                  onClick={() => toggle(idx)}
-                  aria-label={isKept ? `${entity.text} — kept as evidence. Click to mask.` : `${placeholder} — masked. Click to keep.`}
+                  style={S.chipHidden}
+                  onClick={() => toggle(i)}
+                  title="Tap to un-hide"
+                  aria-label={`${ph} hidden. Tap to send original.`}
                 >
-                  {isKept
-                    ? <><span style={styles.chipText}>{entity.text}</span><span style={styles.chipTag}> evidence</span></>
-                    : <><span style={{ textDecoration: 'line-through', opacity: 0.6, fontSize: '0.75em' }}>{entity.text}</span><span style={styles.chipTag}> {placeholder}</span></>
-                  }
+                  <span style={S.chipStrike}>{e.text}</span>
+                  <span style={S.chipPh}>{ph}</span>
                 </button>
               );
             })}
           </div>
+        </div>
+      )}
 
-          {/* Legend */}
-          <div style={styles.legend}>
-            <span style={styles.legendItem}>
-              <span style={{ ...styles.legendSwatch, background: '#fee2e2' }} />
-              Masked — tap to send original
-            </span>
-            <span style={styles.legendItem}>
-              <span style={{ ...styles.legendSwatch, background: '#dbeafe' }} />
-              Kept as evidence — tap to mask
-            </span>
+      {/* Kept items */}
+      {keptItems.length > 0 && (
+        <div style={S.section}>
+          <div style={S.sectionLabel}>We kept these so we can check them:</div>
+          <div style={S.chipRow}>
+            {entities.map((e, i) => {
+              if (actions[i] !== 'keep') return null;
+              const keepLabel = MASK_POLICY_LABELS[e.type] ?? 'evidence';
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  style={S.chipKept}
+                  onClick={() => toggle(i)}
+                  title={`Tap to hide — ${keepLabel}`}
+                  aria-label={`${e.text} kept as ${keepLabel}. Tap to hide.`}
+                >
+                  {e.text}
+                  <span style={S.chipKeptTag}> {keepLabel}</span>
+                </button>
+              );
+            })}
           </div>
-        </>
+        </div>
+      )}
+
+      {entities.length === 0 && (
+        <p style={S.noEntities}>No personal details found. The message will be sent as-is.</p>
       )}
 
       {/* Final masked text preview */}
-      <div style={styles.previewSection}>
-        <div style={styles.previewLabel}>This exact text will be sent:</div>
-        <pre style={styles.previewText}>{maskedText}</pre>
+      <div style={S.section}>
+        <div style={S.sectionLabel}>This exact text will be searched:</div>
+        <pre style={S.preview}>{maskedText}</pre>
       </div>
 
-      {/* Action buttons */}
-      <div style={styles.buttonRow}>
-        <button style={styles.cancelBtn} onClick={onCancel} type="button">
+      {/* Buttons */}
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel} type="button">
           Cancel
         </button>
-        <button style={styles.sendBtn} onClick={() => onSend(maskedText)} type="button">
-          Send for investigation
+        <button style={S.sendBtn} onClick={() => onSend(maskedText)} type="button">
+          Search online
         </button>
       </div>
     </div>
   );
 }
 
-/**
- * Split `text` into segments: plain text and entity slots.
- * @param {string} text
- * @param {Array} entities - sorted by start position
- * @returns {Array<{text: string, entityIdx: number|null}>}
- */
-function buildSegments(text, entities) {
-  const segments = [];
-  let pos = 0;
-  for (let i = 0; i < entities.length; i++) {
-    const e = entities[i];
-    if (e.start > pos) {
-      segments.push({ text: text.slice(pos, e.start), entityIdx: null });
-    }
-    segments.push({ text: text.slice(e.start, e.end), entityIdx: i });
-    pos = e.end;
-  }
-  if (pos < text.length) {
-    segments.push({ text: text.slice(pos), entityIdx: null });
-  }
-  return segments;
-}
 
-const styles = {
+const S = {
   wrap: {
-    background: '#f0fdf4',
-    border: '1px solid #86efac',
-    borderRadius: 10,
-    padding: '16px 18px',
+    background: 'var(--plum-100)',
+    border: '1px solid var(--line)',
+    borderRadius: 'var(--r-bubble-in)',
+    padding: '20px',
+    maxWidth: '96%',
   },
-  header: {
+  titleRow: {
     display: 'flex',
-    gap: 10,
+    gap: 12,
     alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  lockIcon: {
+    fontSize: '1.4rem',
+    flexShrink: 0,
+    lineHeight: 1.3,
+  },
+  title: {
+    fontSize: '1.0625rem',
+    margin: 0,
+    color: 'var(--plum-900)',
+  },
+  regexNote: {
+    fontSize: '0.8125rem',
+    color: '#888',
+    marginTop: 3,
+  },
+  section: {
     marginBottom: 14,
   },
-  lock: {
-    fontSize: '1.2rem',
-    lineHeight: 1,
-    flexShrink: 0,
-    marginTop: 2,
-  },
-  headerTitle: {
-    fontWeight: 700,
-    fontSize: '0.9rem',
-    color: '#14532d',
-  },
-  regexOnly: {
-    fontSize: '0.78rem',
-    color: '#6b7280',
-    marginTop: 3,
-    fontStyle: 'italic',
-  },
   sectionLabel: {
-    fontSize: '0.78rem',
-    fontWeight: 600,
-    color: '#374151',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginBottom: 6,
-  },
-  messageBox: {
-    padding: '10px 12px',
-    background: '#fff',
-    border: '1px solid #bbf7d0',
-    borderRadius: 7,
     fontSize: '0.875rem',
-    lineHeight: 1.9,
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
+    fontWeight: 700,
+    color: 'var(--ink)',
     marginBottom: 8,
   },
-  plainText: {
-    whiteSpace: 'pre-wrap',
+  chipRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 6,
   },
-  chipMasked: {
+  chipHidden: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 2,
-    padding: '1px 7px',
-    background: '#fee2e2',
-    color: '#991b1b',
-    border: '1px solid #fca5a5',
-    borderRadius: 99,
+    gap: 4,
+    padding: '4px 10px',
+    background: 'var(--scam-bg)',
+    color: 'var(--scam)',
+    border: '1px solid #FECACA',
+    borderRadius: 'var(--r-chip)',
     cursor: 'pointer',
     fontFamily: 'inherit',
-    fontSize: '0.82rem',
-    fontWeight: 500,
-    verticalAlign: 'middle',
-    margin: '0 1px',
+    fontSize: '0.875rem',
+    minHeight: 36,
+  },
+  chipStrike: {
+    textDecoration: 'line-through',
+    opacity: 0.5,
+    fontSize: '0.8em',
+  },
+  chipPh: {
+    fontWeight: 700,
+    fontSize: '0.875rem',
   },
   chipKept: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 2,
-    padding: '1px 7px',
-    background: '#dbeafe',
-    color: '#1e40af',
-    border: '1px solid #93c5fd',
-    borderRadius: 99,
+    padding: '4px 10px',
+    background: '#EBF5FF',
+    color: '#1E40AF',
+    border: '1px solid #BFDBFE',
+    borderRadius: 'var(--r-chip)',
     cursor: 'pointer',
     fontFamily: 'inherit',
-    fontSize: '0.82rem',
-    fontWeight: 500,
-    verticalAlign: 'middle',
-    margin: '0 1px',
+    fontSize: '0.875rem',
+    minHeight: 36,
   },
-  chipText: {},
-  chipTag: {
-    fontSize: '0.72rem',
-    opacity: 0.75,
-    marginLeft: 1,
-  },
-  legend: {
-    display: 'flex',
-    gap: 16,
-    flexWrap: 'wrap',
-    marginBottom: 14,
+  chipKeptTag: {
     fontSize: '0.75rem',
-    color: '#6b7280',
+    opacity: 0.7,
   },
-  legendItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 5,
+  noEntities: {
+    fontSize: '0.9375rem',
+    color: '#555',
+    marginBottom: 14,
   },
-  legendSwatch: {
-    display: 'inline-block',
-    width: 10,
-    height: 10,
-    borderRadius: 2,
-    flexShrink: 0,
-  },
-  previewSection: {
-    marginBottom: 16,
-  },
-  previewLabel: {
-    fontSize: '0.78rem',
-    fontWeight: 700,
-    color: '#374151',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    marginBottom: 6,
-  },
-  previewText: {
+  preview: {
     margin: 0,
-    padding: '10px 12px',
+    padding: '12px 14px',
     background: '#fff',
-    border: '1px solid #bbf7d0',
-    borderRadius: 7,
-    fontSize: '0.82rem',
+    border: '1px solid var(--line)',
+    borderRadius: 10,
+    fontSize: '0.875rem',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
-    fontFamily: 'var(--mono, monospace)',
-    color: '#1f2937',
-    maxHeight: 180,
+    fontFamily: 'var(--font-mono)',
+    color: 'var(--ink)',
+    maxHeight: 160,
     overflowY: 'auto',
   },
-  buttonRow: {
+  btnRow: {
     display: 'flex',
     gap: 10,
     justifyContent: 'flex-end',
     flexWrap: 'wrap',
   },
   cancelBtn: {
-    padding: '8px 18px',
-    fontSize: '0.875rem',
+    padding: '10px 20px',
+    fontSize: '0.9375rem',
     background: 'transparent',
-    color: '#6b7280',
-    border: '1px solid #d1d5db',
-    borderRadius: 6,
+    color: '#666',
+    border: '1px solid var(--line)',
+    borderRadius: 'var(--r-btn)',
     cursor: 'pointer',
     fontFamily: 'inherit',
+    minHeight: 48,
   },
   sendBtn: {
-    padding: '8px 18px',
-    fontSize: '0.875rem',
-    fontWeight: 600,
-    background: '#16a34a',
+    padding: '10px 24px',
+    fontSize: '0.9375rem',
+    fontWeight: 700,
+    background: 'var(--plum-700)',
     color: '#fff',
     border: 'none',
-    borderRadius: 6,
+    borderRadius: 'var(--r-btn)',
     cursor: 'pointer',
     fontFamily: 'inherit',
+    minHeight: 48,
   },
 };

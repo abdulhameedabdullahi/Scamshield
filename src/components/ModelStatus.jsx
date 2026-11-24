@@ -1,142 +1,146 @@
-// ModelStatus — shows on-device AI availability and lets the user pre-download
-// the model before they have a message to check.
+// ModelStatus — single friendly line (or setup card) below the top bar.
+// Only shown when availability is known. Never uses jargon.
 
-export default function ModelStatus({ availability, isDownloading, downloadProgress, onDownloadRequest }) {
+export default function ModelStatus({
+  availability, isDownloading, downloadProgress, onDownloadRequest,
+}) {
+  if (!availability) return null;
+
   if (availability === 'available') {
     return (
-      <div style={{ ...styles.banner, ...styles.bannerGreen }}>
-        <span style={styles.icon}>&#9679;</span>
-        <span>Private AI ready — this check runs entirely on your device.</span>
+      <div style={S.strip} role="status" aria-live="polite">
+        <span className="pulse-dot" aria-hidden="true" />
+        <span>Private checker ready on this phone ✓</span>
       </div>
     );
   }
 
-  if (availability === 'downloadable' || availability === 'downloading' || isDownloading) {
+  if (availability === 'downloadable') {
     return (
-      <div style={{ ...styles.banner, ...styles.bannerBlue }}>
-        <div style={styles.downloadRow}>
-          <div>
-            <div style={styles.downloadTitle}>Private AI model available (one-time download)</div>
-            <div style={styles.downloadHint}>
-              Download Gemini Nano to keep your messages private — nothing leaves your device.
-            </div>
+      <div style={S.setupCard}>
+        <div style={S.setupText}>
+          <strong style={S.setupTitle}>Set up private checking</strong>
+          <span style={S.setupHint}> — one-time download, best on Wi-Fi.</span>
+          <div style={S.setupDetail}>
+            Messages checked privately never leave your phone.
           </div>
-          {!isDownloading && (
-            <button style={styles.dlButton} onClick={onDownloadRequest}>
-              Download model
-            </button>
-          )}
         </div>
-        {isDownloading && (
-          <div style={styles.progressWrap}>
-            <div style={styles.progressTrack}>
-              <div style={{ ...styles.progressFill, width: `${downloadProgress ?? 0}%` }} />
+        <button style={S.setupBtn} onClick={onDownloadRequest} type="button">
+          Set up now
+        </button>
+      </div>
+    );
+  }
+
+  if (availability === 'downloading' || isDownloading) {
+    return (
+      <div style={S.setupCard}>
+        <div style={{ ...S.setupText, flex: 1 }}>
+          <strong style={S.setupTitle}>Downloading private checker…</strong>
+          <div style={{ ...S.progressRow, marginTop: 8 }}>
+            <div className="progress-track">
+              <div
+                className="progress-fill"
+                style={{ width: `${downloadProgress ?? 0}%` }}
+              />
             </div>
-            <span style={styles.progressLabel}>{downloadProgress ?? 0}%</span>
+            <span style={S.pct}>{downloadProgress ?? 0}%</span>
           </div>
-        )}
+        </div>
       </div>
     );
   }
 
   if (availability === 'unavailable' || availability === 'unsupported') {
     return (
-      <div style={{ ...styles.banner, ...styles.bannerGrey }}>
-        <span style={styles.icon}>&#9675;</span>
+      <div style={S.strip} role="status">
+        <span style={S.grayDot} aria-hidden="true" />
         <span>
           {availability === 'unsupported'
-            ? 'On-device AI is not supported on this browser. Use Chrome 139+ on desktop to enable private checking.'
-            : 'On-device AI is not available on this device (requires 22 GB free disk + capable GPU/RAM).'}
-          {' '}Messages will be anonymised before any cloud check.
+            ? 'Private checking needs Chrome 139+ on a desktop computer.'
+            : 'This device cannot check privately.'}{' '}
+          You can still check online — personal details are hidden before anything is sent.
         </span>
       </div>
     );
   }
 
-  // 'checking...' or unknown
-  return (
-    <div style={{ ...styles.banner, ...styles.bannerGrey }}>
-      <span style={styles.icon}>&#8230;</span>
-      <span>Checking AI availability…</span>
-    </div>
-  );
+  return null;
 }
 
-const styles = {
-  banner: {
-    borderRadius: 8,
-    padding: '12px 16px',
+const S = {
+  strip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '8px 20px',
+    background: 'var(--plum-100)',
+    borderBottom: '1px solid var(--line)',
     fontSize: '0.875rem',
-    marginBottom: 16,
+    color: 'var(--plum-900)',
+    flexShrink: 0,
+  },
+  grayDot: {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    background: '#aaa',
+    flexShrink: 0,
+  },
+  setupCard: {
+    display: 'flex',
+    gap: 14,
+    alignItems: 'flex-start',
+    padding: '12px 20px',
+    background: 'var(--plum-100)',
+    borderBottom: '1px solid var(--line)',
+    flexShrink: 0,
+  },
+  setupText: {
+    flex: 1,
+    fontSize: '0.9rem',
+    color: 'var(--plum-900)',
     lineHeight: 1.5,
   },
-  bannerGreen: {
-    background: '#f0fdf4',
-    border: '1px solid #bbf7d0',
-    color: '#166534',
+  setupTitle: {
+    fontFamily: 'var(--font-heading)',
+    fontSize: '0.9rem',
+    color: 'var(--plum-900)',
   },
-  bannerBlue: {
-    background: '#eff6ff',
-    border: '1px solid #bfdbfe',
-    color: '#1e3a8a',
+  setupHint: {
+    fontSize: '0.9rem',
+    color: 'var(--plum-700)',
   },
-  bannerGrey: {
-    background: '#f9fafb',
-    border: '1px solid #e5e7eb',
-    color: '#6b7280',
+  setupDetail: {
+    fontSize: '0.8125rem',
+    color: '#555',
+    marginTop: 2,
   },
-  icon: {
-    marginRight: 8,
-  },
-  downloadRow: {
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-    flexWrap: 'wrap',
-  },
-  downloadTitle: {
-    fontWeight: 600,
-    marginBottom: 2,
-  },
-  downloadHint: {
-    color: '#3b82f6',
-    fontSize: '0.82rem',
-  },
-  dlButton: {
-    flexShrink: 0,
+  setupBtn: {
     padding: '7px 16px',
     fontSize: '0.875rem',
-    background: '#1d4ed8',
+    fontWeight: 700,
+    background: 'var(--plum-700)',
     color: '#fff',
     border: 'none',
-    borderRadius: 6,
+    borderRadius: 'var(--r-btn)',
     cursor: 'pointer',
     fontFamily: 'inherit',
+    flexShrink: 0,
     whiteSpace: 'nowrap',
+    minHeight: 44,
   },
-  progressWrap: {
+  progressRow: {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
-    marginTop: 12,
   },
-  progressTrack: {
-    flex: 1,
-    height: 8,
-    background: '#bfdbfe',
-    borderRadius: 99,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    background: '#1d4ed8',
-    borderRadius: 99,
-    transition: 'width 0.3s ease',
-  },
-  progressLabel: {
-    fontSize: '0.82rem',
-    minWidth: 36,
+  pct: {
+    fontSize: '0.8125rem',
+    color: 'var(--plum-700)',
+    minWidth: 32,
     textAlign: 'right',
+    fontWeight: 600,
   },
 };

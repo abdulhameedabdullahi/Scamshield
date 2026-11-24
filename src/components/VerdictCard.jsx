@@ -1,372 +1,273 @@
-// VerdictCard — displays the structured result from checkMessage().
+// VerdictCard — hero verdict bubble from ScamShield.
+// Styled as a chat bubble with big plain-language verdict + checklist.
 //
 // Props:
-//   result         — result object from checkMessage/onDeviceCheck/cloudCheck
-//   originalText   — the original message text (used for inline highlighting)
-//   onSecondOpinion — callback to request cloud second opinion (optional)
-//
-// Colour scheme:
-//   scam       → red
-//   suspicious → amber
-//   safe       → green
+//   result        — from checkMessage/onDeviceCheck/cloudCheck
+//   originalText  — raw message (for inline highlights)
+//   onInvestigate — callback for "Dig deeper online" button (optional)
 
 import { REPORTING_TIPS, ADVICE_BY_CATEGORY } from '../config';
 import HighlightedMessage from './HighlightedMessage';
 
-const VERDICT_CONFIG = {
+const VERDICT_CFG = {
   scam: {
-    label: 'SCAM',
-    bg: '#fef2f2',
-    border: '#fca5a5',
-    headBg: '#dc2626',
-    headText: '#fff',
-    bodyText: '#7f1d1d',
+    icon:     '🚨',
+    headline: 'This is a scam.',
+    bg:       'var(--scam-bg)',
+    border:   '#FECACA',
+    color:    'var(--scam)',
+    bodyColor: '#7f1d1d',
   },
   suspicious: {
-    label: 'SUSPICIOUS',
-    bg: '#fffbeb',
-    border: '#fcd34d',
-    headBg: '#d97706',
-    headText: '#fff',
-    bodyText: '#78350f',
+    icon:     '⚠️',
+    headline: 'Be careful. This looks suspicious.',
+    bg:       'var(--warn-bg)',
+    border:   '#FDE68A',
+    color:    'var(--warn)',
+    bodyColor: '#78350f',
   },
   safe: {
-    label: 'SAFE',
-    bg: '#f0fdf4',
-    border: '#86efac',
-    headBg: '#16a34a',
-    headText: '#fff',
-    bodyText: '#14532d',
+    icon:     '✅',
+    headline: 'This message looks safe.',
+    bg:       'var(--safe-bg)',
+    border:   '#A7F3D0',
+    color:    'var(--safe)',
+    bodyColor: '#14532d',
   },
 };
 
 const CATEGORY_LABELS = {
-  fake_bank_alert:          'Fake Bank Alert',
-  account_block_or_bvn_nin: 'Account / BVN / NIN Block',
-  otp_pin_request:          'OTP / PIN Request',
-  job_or_loan_upfront_fee:  'Job / Loan with Upfront Fee',
-  prize_or_lottery:         'Prize / Lottery',
+  fake_bank_alert:          'Fake bank alert',
+  account_block_or_bvn_nin: 'Account / BVN / NIN block',
+  otp_pin_request:          'OTP / PIN request',
+  job_or_loan_upfront_fee:  'Job / loan with upfront fee',
+  prize_or_lottery:         'Prize / lottery',
   impersonation:            'Impersonation',
-  investment_scheme:        'Investment Scheme',
-  wrong_transfer_refund:    'Wrong Transfer Refund',
-  romance:                  'Romance Scam',
-  phishing_link:            'Phishing Link',
-  other:                    'Other',
+  investment_scheme:        'Investment scheme',
+  wrong_transfer_refund:    'Wrong transfer refund',
+  romance:                  'Romance scam',
+  phishing_link:            'Phishing link',
+  other:                    'Other suspicious message',
 };
-
-const CONFIDENCE_LABELS = {
-  high:   'High confidence',
-  medium: 'Medium confidence',
-  low:    'Low confidence',
-};
-
-function getCategoryLabel(verdict, category) {
-  if (verdict === 'safe') return 'Legitimate message';
-  if (category === 'none') return 'Other suspicious message';
-  return CATEGORY_LABELS[category] ?? category;
-}
 
 export default function VerdictCard({ result, originalText, onInvestigate }) {
-  const cfg = VERDICT_CONFIG[result.verdict] ?? VERDICT_CONFIG.suspicious;
-  const categoryLabel = getCategoryLabel(result.verdict, result.category);
-  const confidenceLabel = CONFIDENCE_LABELS[result.confidence] ?? result.confidence;
-  const isCloud = result.source === 'cloud';
+  const cfg = VERDICT_CFG[result.verdict] ?? VERDICT_CFG.suspicious;
   const isSafe = result.verdict === 'safe';
+  const isCloud = result.source === 'cloud';
+  const categoryLabel = isSafe
+    ? null
+    : (CATEGORY_LABELS[result.category] ?? null);
 
-  // Advice from config — keyed by category, fallback to 'other'
   const advice = ADVICE_BY_CATEGORY[result.category] ?? ADVICE_BY_CATEGORY.other;
-
-  // Highlights for HighlightedMessage: use flags that have valid start/end positions
   const highlights = (result.redFlags ?? []).filter((f) => f.start >= 0);
 
+  // Checklist items: advice first, then static reporting tips (max 3)
+  const checklistItems = isSafe
+    ? [advice]
+    : [advice, ...REPORTING_TIPS.slice(0, 3)];
+
   return (
-    <div style={{ ...styles.card, background: cfg.bg, border: `1px solid ${cfg.border}` }}>
-      {/* Header */}
-      <div style={{ ...styles.header, background: cfg.headBg }}>
-        <span style={{ ...styles.verdictLabel, color: cfg.headText }}>
-          {cfg.label}
-        </span>
-        <span style={{ ...styles.category, color: cfg.headText }}>
-          {categoryLabel}
-        </span>
-      </div>
-
-      {/* Body */}
-      <div style={{ ...styles.body, color: cfg.bodyText }}>
-        {/* Explanation + confidence */}
-        <p style={styles.summary}>{result.explanation}</p>
-        <p style={styles.confidence}>{confidenceLabel}</p>
-
-        {/* Highlighted original text — shows which phrases triggered the flags */}
-        {originalText && (
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>Message</div>
-            <div style={{ ...styles.messageBox, borderColor: cfg.border }}>
-              <HighlightedMessage text={originalText} highlights={highlights} />
-            </div>
-            {highlights.length > 0 && (
-              <p style={styles.highlightHint}>
-                Hover highlighted phrases to see why they were flagged.
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Red flags — only shown for scam/suspicious */}
-        {result.redFlags && result.redFlags.length > 0 && (
-          <div style={styles.section}>
-            <div style={styles.sectionTitle}>Red flags</div>
-            <ul style={styles.flagList}>
-              {result.redFlags.map((flag, i) => (
-                <li key={i} style={styles.flagItem}>
-                  <span style={styles.flagPhrase}>
-                    &ldquo;{flag.phrase}&rdquo;
-                  </span>
-                  {flag.reason && (
-                    <span style={styles.flagReason}> — {flag.reason}</span>
-                  )}
-                  {flag.source && (
-                    <span style={styles.flagSource}>
-                      {' '}({flag.source === 'rule' ? 'rule' : 'AI'})
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Per-category advice from config (replaces AI-generated advice) */}
-        <div style={styles.section}>
-          <div style={styles.sectionTitle}>{isSafe ? 'Note' : 'Advice'}</div>
-          <p style={styles.advice}>{advice}</p>
-        </div>
-
-        {/* Static reporting tips — only for scam/suspicious */}
-        {!isSafe && (
-          <div style={{ ...styles.section, ...styles.reportingBox }}>
-            <div style={{ ...styles.sectionTitle, color: cfg.bodyText }}>What you can do</div>
-            <ul style={styles.reportingList}>
-              {REPORTING_TIPS.map((tip, i) => (
-                <li key={i} style={styles.reportingItem}>{tip}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Agent investigation button — merged cloud action for all verdicts */}
-        {onInvestigate && (
-          <div style={styles.investigateRow}>
-            <button
-              style={styles.investigateBtn}
-              onClick={onInvestigate}
-              type="button"
-            >
-              Investigate with ScamShield Agent
-              <span style={styles.investigateNote}> (cloud · personal details masked)</span>
-            </button>
-          </div>
-        )}
-
-        {/* Footer: source + timing */}
-        <div style={styles.footer}>
-          <span style={{ ...styles.sourceBadge, ...(isCloud ? styles.sourceBadgeCloud : styles.sourceBadgeDevice) }}>
-            {isCloud ? 'Cloud check (text was masked)' : 'Private (checked on-device)'}
-          </span>
-          {result.durationMs != null && (
-            <span style={styles.timing}>{result.durationMs.toLocaleString()} ms</span>
+    <div
+      className="verdict-enter"
+      style={{ ...S.bubble, background: cfg.bg, border: `1px solid ${cfg.border}` }}
+      role="region"
+      aria-label={`Verdict: ${cfg.headline}`}
+      aria-live="polite"
+    >
+      {/* Verdict headline */}
+      <div style={S.headRow}>
+        <span style={S.icon} aria-hidden="true">{cfg.icon}</span>
+        <div>
+          <h2 style={{ ...S.headline, color: cfg.color }}>{cfg.headline}</h2>
+          {categoryLabel && (
+            <div style={{ ...S.category, color: cfg.bodyColor }}>{categoryLabel}</div>
           )}
         </div>
+      </div>
 
-        {/* Show masked text preview for cloud checks */}
-        {isCloud && result.maskedText && (
-          <details style={styles.maskedDetails}>
-            <summary style={styles.maskedSummary}>View what was sent to the cloud</summary>
-            <pre style={styles.maskedText}>{result.maskedText}</pre>
-          </details>
+      {/* One-line reason */}
+      {result.explanation && (
+        <p style={{ ...S.explanation, color: cfg.bodyColor }}>{result.explanation}</p>
+      )}
+
+      {/* Original message with highlights */}
+      {originalText && (
+        <div style={S.section}>
+          <div style={S.sectionLabel}>The message you received</div>
+          <div style={{ ...S.msgBox, borderColor: cfg.border }}>
+            <HighlightedMessage text={originalText} highlights={highlights} />
+          </div>
+          {highlights.length > 0 && (
+            <p style={S.tapHint}>Tap highlighted phrases to see why they were flagged.</p>
+          )}
+        </div>
+      )}
+
+      {/* What to do now */}
+      <div style={S.section}>
+        <div style={S.sectionLabel}>What to do now</div>
+        <ul style={S.checklist} aria-label="Action checklist">
+          {checklistItems.map((item, i) => (
+            <li key={i} style={S.checkItem}>
+              <span style={S.checkMark} aria-hidden="true">☑</span>
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Dig deeper button */}
+      {onInvestigate && (
+        <button
+          style={S.deeperBtn}
+          onClick={onInvestigate}
+          type="button"
+        >
+          Dig deeper online
+        </button>
+      )}
+
+      {/* Privacy / source badge */}
+      <div style={S.sourceLine}>
+        {isCloud
+          ? '☁️ Checked online. Personal details were hidden before sending.'
+          : '🔒 Checked on this phone. Nothing was uploaded.'}
+        {result.durationMs != null && (
+          <span style={S.timing}> · {(result.durationMs / 1000).toFixed(1)}s</span>
         )}
       </div>
+
+      {/* Masked text for cloud results */}
+      {isCloud && result.maskedText && (
+        <details style={S.maskedDetails}>
+          <summary style={S.maskedSummary}>View what was sent online</summary>
+          <pre style={S.maskedPre}>{result.maskedText}</pre>
+        </details>
+      )}
     </div>
   );
 }
 
-const styles = {
-  card: {
-    borderRadius: 10,
-    overflow: 'hidden',
+const S = {
+  bubble: {
+    borderRadius: 'var(--r-bubble-in)',
+    padding: '18px 20px 16px',
+    maxWidth: '92%',
   },
-  header: {
+  headRow: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
-    padding: '10px 16px',
-  },
-  verdictLabel: {
-    fontSize: '0.9rem',
-    fontWeight: 700,
-    letterSpacing: '0.08em',
-  },
-  category: {
-    fontSize: '0.82rem',
-    fontWeight: 500,
-    opacity: 0.9,
-  },
-  body: {
-    padding: '16px 16px 12px',
-  },
-  summary: {
-    margin: '0 0 4px',
-    fontSize: '0.95rem',
-    fontWeight: 500,
-    lineHeight: 1.5,
-  },
-  confidence: {
-    margin: '0 0 16px',
-    fontSize: '0.82rem',
-    opacity: 0.75,
-  },
-  section: {
-    marginBottom: 14,
-  },
-  sectionTitle: {
-    fontSize: '0.8rem',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    marginBottom: 6,
-    opacity: 0.7,
-  },
-  messageBox: {
-    padding: '10px 12px',
-    background: 'rgba(0,0,0,0.03)',
-    borderRadius: 6,
-    border: '1px solid',
-  },
-  highlightHint: {
-    margin: '4px 0 0',
-    fontSize: '0.75rem',
-    opacity: 0.6,
-    fontStyle: 'italic',
-  },
-  flagList: {
-    margin: 0,
-    paddingLeft: 18,
-  },
-  flagItem: {
-    fontSize: '0.875rem',
-    lineHeight: 1.6,
-    marginBottom: 4,
-  },
-  flagPhrase: {
-    fontWeight: 600,
-  },
-  flagReason: {
-    opacity: 0.85,
-  },
-  flagSource: {
-    fontSize: '0.75rem',
-    opacity: 0.55,
-  },
-  advice: {
-    margin: 0,
-    fontSize: '0.875rem',
-    lineHeight: 1.6,
-  },
-  reportingBox: {
-    background: 'rgba(0,0,0,0.04)',
-    borderRadius: 7,
-    padding: '10px 12px',
-    marginBottom: 14,
-  },
-  reportingList: {
-    margin: 0,
-    paddingLeft: 18,
-  },
-  reportingItem: {
-    fontSize: '0.82rem',
-    lineHeight: 1.7,
-    marginBottom: 2,
-  },
-  secondOpinionRow: {
     marginBottom: 10,
   },
-  secondOpinionBtn: {
-    padding: '7px 14px',
-    fontSize: '0.82rem',
+  icon: {
+    fontSize: '1.75rem',
+    lineHeight: 1,
+    flexShrink: 0,
+    marginTop: 2,
+  },
+  headline: {
+    fontSize: '1.25rem',
+    fontFamily: 'var(--font-heading)',
     fontWeight: 600,
-    background: 'transparent',
-    border: '1px solid currentColor',
-    borderRadius: 6,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    opacity: 0.75,
+    lineHeight: 1.3,
+    margin: 0,
   },
-  secondOpinionNote: {
-    fontWeight: 400,
-    opacity: 0.8,
+  category: {
+    fontSize: '0.875rem',
+    marginTop: 3,
+    fontWeight: 500,
   },
-  investigateRow: {
-    marginBottom: 14,
+  explanation: {
+    fontSize: '0.9375rem',
+    lineHeight: 1.55,
+    marginBottom: 16,
   },
-  investigateBtn: {
-    padding: '7px 14px',
-    fontSize: '0.82rem',
-    fontWeight: 600,
-    background: '#eef2ff',
-    border: '1px solid #a5b4fc',
-    borderRadius: 6,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    color: '#3730a3',
+  section: {
+    marginBottom: 16,
   },
-  investigateNote: {
-    fontWeight: 400,
-    opacity: 0.75,
+  sectionLabel: {
+    fontSize: '0.8125rem',
+    fontWeight: 700,
+    color: '#666',
+    marginBottom: 6,
+    textTransform: 'none',
   },
-  footer: {
+  msgBox: {
+    padding: '10px 12px',
+    background: 'rgba(255,255,255,0.65)',
+    borderRadius: 10,
+    border: '1px solid',
+    fontSize: '0.9375rem',
+    lineHeight: 1.6,
+  },
+  tapHint: {
+    fontSize: '0.8125rem',
+    color: '#888',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  checklist: {
+    listStyle: 'none',
+    margin: 0,
+    padding: 0,
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
     gap: 8,
-    marginTop: 16,
-    paddingTop: 12,
-    borderTop: '1px solid rgba(0,0,0,0.08)',
-    flexWrap: 'wrap',
   },
-  sourceBadge: {
-    fontSize: '0.78rem',
-    fontWeight: 600,
-    padding: '3px 10px',
-    borderRadius: 99,
+  checkItem: {
+    display: 'flex',
+    gap: 10,
+    alignItems: 'flex-start',
+    fontSize: '0.9375rem',
+    lineHeight: 1.5,
   },
-  sourceBadgeDevice: {
-    background: '#dcfce7',
-    color: '#166534',
+  checkMark: {
+    flexShrink: 0,
+    marginTop: 1,
+    fontSize: '1rem',
   },
-  sourceBadgeCloud: {
-    background: '#dbeafe',
-    color: '#1e40af',
+  deeperBtn: {
+    display: 'block',
+    width: '100%',
+    padding: '12px 16px',
+    marginBottom: 14,
+    fontSize: '0.9375rem',
+    fontWeight: 700,
+    background: 'var(--plum-700)',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 'var(--r-btn)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    textAlign: 'center',
+    minHeight: 48,
+  },
+  sourceLine: {
+    fontSize: '0.8125rem',
+    color: '#666',
+    lineHeight: 1.4,
+    marginTop: 4,
   },
   timing: {
-    fontSize: '0.78rem',
-    opacity: 0.6,
+    opacity: 0.7,
   },
   maskedDetails: {
     marginTop: 10,
   },
   maskedSummary: {
-    fontSize: '0.8rem',
+    fontSize: '0.8125rem',
     cursor: 'pointer',
-    opacity: 0.7,
+    color: '#888',
   },
-  maskedText: {
-    marginTop: 6,
+  maskedPre: {
+    margin: '6px 0 0',
     padding: '10px 12px',
-    background: 'rgba(0,0,0,0.06)',
-    borderRadius: 6,
-    fontSize: '0.8rem',
+    background: 'rgba(255,255,255,0.65)',
+    borderRadius: 8,
+    fontSize: '0.8125rem',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
-    fontFamily: 'var(--mono, monospace)',
+    fontFamily: 'var(--font-mono)',
   },
 };

@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
-import { APP_NAME } from './config';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getOnDeviceAvailability } from './ai/availability';
 import {
   checkMessage, downloadAndCheck, cloudCheck,
@@ -7,6 +6,7 @@ import {
 } from './ai/checkMessage';
 import { analyzeSignals } from './ai/rules';
 import { detectEntities } from './ai/maskMessage';
+import Logo from './components/Logo';
 import ModelStatus from './components/ModelStatus';
 import MessageInput from './components/MessageInput';
 import VerdictCard from './components/VerdictCard';
@@ -16,86 +16,98 @@ import DevTestPanel from './components/DevTestPanel';
 import TestRunner from './dev/TestRunner';
 import { runAgentTests, runAgentDemo } from './dev/agentTest';
 import Dashboard from './components/dashboard/Dashboard';
+import PrivacyPage from './components/pages/PrivacyPage';
+import AboutPage from './components/pages/AboutPage';
+import { Menu, X } from 'lucide-react';
 
-// App-level state machine:
-//   idle           → waiting for user to type and click Check
-//   checking       → model is generating (streaming in progress)
-//   needs_download → model not downloaded; waiting for user gesture
-//   downloading    → preloadDeviceModel or downloadAndCheck in progress
-//   masking        → running detectEntities() before showing cloud SendPreview
-//   send_preview   → SendPreview shown for the first cloud check
-//   done           → result is ready
-//   error          → an error occurred
-//
-// Agent (investigation) state machine:
-//   idle | masking | send_preview | running
+// ── Routing ────────────────────────────────────────────────────────────────
+
+function hashToPage(hash) {
+  if (hash === '#/accuracy') return 'dashboard';
+  if (hash === '#/privacy')  return 'privacy';
+  if (hash === '#/about')    return 'about';
+  return 'check';
+}
+
+// ── Example messages ───────────────────────────────────────────────────────
+
+const EXAMPLES = [
+  {
+    label: 'Bank alert',
+    text: 'ALERT: Your GTBank account has been debited N150,000. If you did not authorise this, click here to reverse: http://gtbnk-verify.com/secure',
+  },
+  {
+    label: 'Job offer',
+    text: 'Congratulations! You have been selected for a remote data-entry job. Salary: N80,000/month. Pay N5,000 registration fee to get started. Reply YES.',
+  },
+  {
+    label: 'BVN threat',
+    text: 'CBN NOTICE: Your BVN has been flagged for suspicious activity. Update your BVN immediately at www.cbn-bvn-update.net or your accounts will be frozen within 24 hours.',
+  },
+];
+
+// ── App ────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [page, setPage] = useState(
-    () => window.location.hash === '#/accuracy' ? 'dashboard' : 'check'
-  );
+  const [page, setPage] = useState(() => hashToPage(window.location.hash));
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    const handleHash = () =>
-      setPage(window.location.hash === '#/accuracy' ? 'dashboard' : 'check');
-    window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
+    const onHash = () => setPage(hashToPage(window.location.hash));
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  const [appState, setAppState] = useState('idle');
-  const [text, setText] = useState('');
-  const [result, setResult] = useState(null);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [availability, setAvailability] = useState(null);
+  function navigate(hash) {
+    window.location.hash = hash;
+    setPage(hashToPage(hash));
+    setMenuOpen(false);
+  }
+
+  // ── Check page state ──────────────────────────────────────────────────────
+
+  const [appState, setAppState]             = useState('idle');
+  const [text, setText]                     = useState('');
+  const [result, setResult]                 = useState(null);
+  const [errorMsg, setErrorMsg]             = useState('');
+  const [availability, setAvailability]     = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const [devOpen, setDevOpen] = useState(false);
-
-  // ── Live check progress ────────────────────────────────────────────────────
+  const [devOpen, setDevOpen]               = useState(false);
   const [checkStartTime, setCheckStartTime] = useState(null);
-  const [elapsedMs, setElapsedMs] = useState(0);
-  const [charsReceived, setCharsReceived] = useState(0);
+  const [maskData, setMaskData]             = useState(null);
 
-  // ── Cloud send-preview state (first check path) ────────────────────────────
-  const [maskData, setMaskData] = useState(null); // { entities, regexOnly }
-
-  // ── Agent (investigation) state ────────────────────────────────────────────
-  // 'idle' | 'masking' | 'send_preview' | 'running'
-  const [investigateState, setInvestigateState] = useState('idle');
+  // Agent state
+  const [investigateState, setInvestigateState]     = useState('idle');
   const [investigateMaskData, setInvestigateMaskData] = useState(null);
   const [investigateMaskedText, setInvestigateMaskedText] = useState(null);
   const [investigateVerdict, setInvestigateVerdict] = useState(null);
 
-  // ── Instant rules preview ──────────────────────────────────────────────────
+  // Instant rule preview
   const [preliminarySignals, setPreliminarySignals] = useState(null);
 
-  // Tick elapsed time every 100 ms while a check is running
+  // Scroll
+  const bottomRef = useRef(null);
+
   useEffect(() => {
     if (!checkStartTime) return;
-    const id = setInterval(() => setElapsedMs(Date.now() - checkStartTime), 100);
+    const id = setInterval(() => {}, 100);
     return () => clearInterval(id);
   }, [checkStartTime]);
 
-  // ── Availability + warm-up ─────────────────────────────────────────────────
   useEffect(() => {
     getOnDeviceAvailability().then(setAvailability);
   }, []);
 
   useEffect(() => {
-    if (availability === 'available') {
-      warmUpDeviceModel();
-    }
+    if (availability === 'available') warmUpDeviceModel();
   }, [availability]);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [appState, investigateState, result]);
 
-  function startProgress() {
-    setCheckStartTime(Date.now());
-    setCharsReceived(0);
-  }
-
-  function stopProgress() {
-    setCheckStartTime(null);
-  }
+  function startProgress() { setCheckStartTime(Date.now()); }
+  function stopProgress()  { setCheckStartTime(null); }
 
   function handleTextChange(newText) {
     setText(newText);
@@ -104,10 +116,7 @@ export default function App() {
       appState === 'send_preview' || appState === 'masking' ||
       appState === 'needs_download'
     ) {
-      setAppState('idle');
-      setResult(null);
-      setErrorMsg('');
-      setMaskData(null);
+      setAppState('idle'); setResult(null); setErrorMsg(''); setMaskData(null);
     }
     setInvestigateState('idle');
     setInvestigateMaskData(null);
@@ -117,51 +126,32 @@ export default function App() {
   }
 
   function handleClear() {
-    setText('');
-    setAppState('idle');
-    setResult(null);
-    setErrorMsg('');
-    setMaskData(null);
-    setInvestigateState('idle');
-    setInvestigateMaskData(null);
-    setInvestigateMaskedText(null);
-    setInvestigateVerdict(null);
+    setText(''); setAppState('idle'); setResult(null); setErrorMsg('');
+    setMaskData(null); setInvestigateState('idle'); setInvestigateMaskData(null);
+    setInvestigateMaskedText(null); setInvestigateVerdict(null);
     setPreliminarySignals(null);
   }
-
-  // ── Main check entry point ─────────────────────────────────────────────────
 
   async function handleCheck() {
     if (!text.trim()) return;
     const instant = analyzeSignals(text.trim());
-    setAppState('checking');
-    setResult(null);
-    setErrorMsg('');
-    setMaskData(null);
-    setInvestigateState('idle');
-    setInvestigateMaskData(null);
-    setInvestigateMaskedText(null);
-    setInvestigateVerdict(null);
+    setAppState('checking'); setResult(null); setErrorMsg(''); setMaskData(null);
+    setInvestigateState('idle'); setInvestigateMaskData(null);
+    setInvestigateMaskedText(null); setInvestigateVerdict(null);
     setPreliminarySignals(instant);
     startProgress();
-
     try {
-      const outcome = await checkMessage(text, (chars) => setCharsReceived(chars));
+      const outcome = await checkMessage(text, () => {});
       stopProgress();
-
       if (outcome.state === 'needs_download') {
-        setAvailability(outcome.availability);
-        setAppState('needs_download');
+        setAvailability(outcome.availability); setAppState('needs_download');
       } else if (outcome.state === 'needs_consent') {
-        setAvailability(outcome.availability);
-        // Start masking immediately (no consent dialog — go straight to SendPreview)
-        setAppState('masking');
+        setAvailability(outcome.availability); setAppState('masking');
         try {
           const md = await detectEntities(text);
-          setMaskData(md);
-          setAppState('send_preview');
+          setMaskData(md); setAppState('send_preview');
         } catch (err) {
-          setErrorMsg(err?.message ?? 'Failed to prepare masked text. Please try again.');
+          setErrorMsg(err?.message ?? 'Couldn\'t prepare message. Please try again.');
           setAppState('error');
         }
       } else {
@@ -171,85 +161,59 @@ export default function App() {
       }
     } catch (err) {
       stopProgress();
-      setErrorMsg(err?.message ?? 'An unexpected error occurred. Please try again.');
+      setErrorMsg(err?.message ?? 'Something went wrong. Please try again.');
       setAppState('error');
     }
   }
 
-  // ── Download & check ───────────────────────────────────────────────────────
-
   const handleDownloadAndCheck = useCallback(async () => {
-    setAppState('downloading');
-    setDownloadProgress(0);
+    setAppState('downloading'); setDownloadProgress(0);
     try {
       const outcome = await downloadAndCheck(
         text,
         (p) => setDownloadProgress(Math.round(p * 100)),
-        (chars) => setCharsReceived(chars),
+        () => {},
       );
-      setResult(outcome);
-      setAvailability('available');
-      setAppState('done');
+      setResult(outcome); setAvailability('available'); setAppState('done');
     } catch (err) {
-      setErrorMsg(err?.message ?? 'Download failed. Please try again.');
-      setAppState('error');
+      setErrorMsg(err?.message ?? 'Download failed. Please try again.'); setAppState('error');
     }
   }, [text]);
 
-  // ── Pre-download ───────────────────────────────────────────────────────────
-
   const handlePreload = useCallback(async () => {
-    setAppState('downloading');
-    setDownloadProgress(0);
+    setAppState('downloading'); setDownloadProgress(0);
     try {
       await preloadDeviceModel((p) => setDownloadProgress(Math.round(p * 100)));
-      setAvailability('available');
-      setAppState('idle');
+      setAvailability('available'); setAppState('idle');
     } catch (err) {
-      setErrorMsg(err?.message ?? 'Download failed. Please try again.');
-      setAppState('error');
+      setErrorMsg(err?.message ?? 'Download failed. Please try again.'); setAppState('error');
     }
   }, []);
 
-  // ── Cloud send-preview confirmed (first check path) ────────────────────────
-
   async function handleCloudSendConfirm(maskedText) {
-    setAppState('checking');
-    setMaskData(null);
-    setResult(null);
-    setErrorMsg('');
+    setAppState('checking'); setMaskData(null); setResult(null); setErrorMsg('');
     startProgress();
     try {
-      const outcome = await cloudCheck(text, (chars) => setCharsReceived(chars), maskedText);
-      stopProgress();
-      setResult(outcome);
-      setAppState('done');
+      const outcome = await cloudCheck(text, () => {}, maskedText);
+      stopProgress(); setResult(outcome); setAppState('done');
     } catch (err) {
       stopProgress();
-      setErrorMsg(err?.message ?? 'Cloud check failed. Please try again.');
+      setErrorMsg(err?.message ?? 'Couldn\'t check online. Check your internet and try again.');
       setAppState('error');
     }
   }
 
-  function handleCloudSendCancel() {
-    setAppState('idle');
-    setMaskData(null);
-  }
-
-  // ── Agent investigation flow ───────────────────────────────────────────────
+  function handleCloudSendCancel() { setAppState('idle'); setMaskData(null); }
 
   async function handleInvestigateRequest(verdictResult) {
-    setInvestigateState('masking');
-    setInvestigateMaskData(null);
-    setInvestigateMaskedText(null);
-    setInvestigateVerdict(verdictResult);
+    setInvestigateState('masking'); setInvestigateMaskData(null);
+    setInvestigateMaskedText(null); setInvestigateVerdict(verdictResult);
     try {
       const md = await detectEntities(text);
-      setInvestigateMaskData(md);
-      setInvestigateState('send_preview');
+      setInvestigateMaskData(md); setInvestigateState('send_preview');
     } catch (err) {
       setInvestigateState('idle');
-      console.error('[ScamShield] Investigation masking failed:', err?.message);
+      console.error('[ScamShield] Masking failed:', err?.message);
     }
   }
 
@@ -260,8 +224,7 @@ export default function App() {
   }
 
   function handleInvestigateSendCancel() {
-    setInvestigateState('idle');
-    setInvestigateMaskData(null);
+    setInvestigateState('idle'); setInvestigateMaskData(null);
   }
 
   function handleInvestigateClose() {
@@ -270,452 +233,650 @@ export default function App() {
     setInvestigateVerdict(null);
   }
 
-  // ── Derived state ──────────────────────────────────────────────────────────
-
-  const isChecking = appState === 'checking';
+  const isChecking   = appState === 'checking';
   const isDownloading = appState === 'downloading';
+  const isDev = import.meta.env.DEV || window.location.hash.includes('dev');
+  const hasConversation = !!(text || result || appState !== 'idle');
 
   const checkingLabel = availability === 'available'
-    ? 'Analysing privately on your device…'
-    : 'Analysing via cloud…';
+    ? 'Reading your message on this phone…'
+    : 'Analysing with personal details hidden…';
+
+  const riskSignals = (preliminarySignals?.signals ?? []).filter(
+    (s) => s.weight > 0 && s.phrase,
+  );
+  const uniqueSignals = [...new Map(riskSignals.map((s) => [s.id, s])).values()];
 
   return (
-    <div style={page === 'dashboard' ? styles.containerWide : styles.container}>
-      {/* Navigation */}
-      <nav style={styles.nav}>
-        <span style={styles.navBrand}>{APP_NAME}</span>
-        <div style={styles.navLinks}>
-          <a
-            href="#"
-            style={page === 'check' ? styles.navLinkActive : styles.navLink}
-          >
-            Check a message
-          </a>
-          <a
-            href="#/accuracy"
-            style={page === 'dashboard' ? styles.navLinkActive : styles.navLink}
-          >
-            How accurate is it?
-          </a>
-        </div>
-      </nav>
+    <div className="app-shell">
 
-      {/* Dashboard page */}
-      {page === 'dashboard' && <Dashboard />}
+      {/* ── Top bar ───────────────────────────────────────────────────────── */}
+      <header className="topbar">
+        <a
+          href="#"
+          onClick={(e) => { e.preventDefault(); navigate('#'); }}
+          style={S.brandLink}
+          aria-label="ScamShield — go to home"
+        >
+          <Logo size={28} color="#EFE8F4" />
+          <span style={S.brandName}>ScamShield</span>
+        </a>
 
-      {/* Check page */}
-      {page === 'check' && <>
+        {hasConversation && page === 'check' && (
+          <button style={S.newCheckBtn} onClick={handleClear} type="button">
+            New check
+          </button>
+        )}
 
-      {/* Header */}
-      <header style={styles.header}>
-        <h1 style={styles.title}>{APP_NAME}</h1>
-        <p style={styles.subtitle}>
-          Check if an SMS, WhatsApp or email message is a scam — privately, on your device.
-        </p>
+        <button
+          style={S.menuBtn}
+          onClick={() => setMenuOpen(true)}
+          type="button"
+          aria-label="Open menu"
+          aria-expanded={menuOpen}
+        >
+          <Menu size={22} color="#EFE8F4" strokeWidth={1.75} />
+        </button>
       </header>
 
-      {/* On-device AI status banner */}
-      <ModelStatus
-        availability={isDownloading ? 'downloading' : availability}
-        isDownloading={isDownloading}
-        downloadProgress={downloadProgress}
-        onDownloadRequest={handlePreload}
-      />
-
-      {/* Message input */}
-      <MessageInput
-        value={text}
-        onChange={handleTextChange}
-        onCheck={handleCheck}
-        onClear={handleClear}
-        disabled={isChecking || isDownloading}
-      />
-
-      {/* Instant rules preview — shown while AI is running */}
-      {preliminarySignals && appState === 'checking' && (
-        <PreliminaryCard signals={preliminarySignals} />
-      )}
-
-      {/* Live progress indicator while checking */}
-      {isChecking && (
-        <div style={styles.progressBox}>
-          <span style={styles.progressDot} />
-          <span style={styles.progressText}>{checkingLabel}</span>
-          <span style={styles.progressStats}>
-            {charsReceived > 0 && `${charsReceived} chars · `}
-            {(elapsedMs / 1000).toFixed(1)}s
-          </span>
-        </div>
-      )}
-
-      {/* Masking progress (before showing SendPreview) */}
-      {(appState === 'masking' || investigateState === 'masking') && (
-        <div style={styles.maskingBox}>
-          <span style={styles.progressDot} />
-          <span style={styles.progressText}>Detecting personal details on your device…</span>
-        </div>
-      )}
-
-      {/* Download-and-check prompt */}
-      {appState === 'needs_download' && (
-        <div style={styles.downloadPrompt}>
-          <p style={styles.downloadPromptText}>
-            The private AI model needs to be downloaded before checking your message.
-            This is a one-time download.
-          </p>
-          {isDownloading && (
-            <div style={styles.progressRow}>
-              <div style={styles.progressTrack}>
-                <div style={{ ...styles.progressFill, width: `${downloadProgress}%` }} />
-              </div>
-              <span style={styles.progressLabel}>{downloadProgress}%</span>
-            </div>
-          )}
-          {!isDownloading && (
-            <button style={styles.dlBtn} onClick={handleDownloadAndCheck} type="button">
-              Download and check
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Send preview — first cloud check */}
-      {appState === 'send_preview' && maskData && (
-        <div style={styles.sendPreviewWrap}>
-          <SendPreview
-            originalText={text}
-            entities={maskData.entities}
-            regexOnly={maskData.regexOnly}
-            onSend={handleCloudSendConfirm}
-            onCancel={handleCloudSendCancel}
-          />
-        </div>
-      )}
-
-      {/* Error */}
-      {appState === 'error' && errorMsg && (
-        <div style={styles.errorBox}>
-          <strong>Error: </strong>{errorMsg}
-        </div>
-      )}
-
-      {/* Main result */}
-      {appState === 'done' && result && (
-        <div style={styles.resultWrap}>
-          <VerdictCard
-            result={result}
-            originalText={text}
-            onInvestigate={investigateState === 'idle' ? () => handleInvestigateRequest(result) : undefined}
-          />
-        </div>
-      )}
-
-      {/* Agent — send preview */}
-      {investigateState === 'send_preview' && investigateMaskData && (
-        <div style={styles.sendPreviewWrap}>
-          <SendPreview
-            originalText={text}
-            entities={investigateMaskData.entities}
-            regexOnly={investigateMaskData.regexOnly}
-            onSend={handleInvestigateSendConfirm}
-            onCancel={handleInvestigateSendCancel}
-          />
-        </div>
-      )}
-
-      {/* Agent panel */}
-      {investigateState === 'running' && investigateMaskedText && (
-        <div style={styles.investigateWrap}>
-          <AgentPanel
-            maskedText={investigateMaskedText}
-            deviceVerdict={investigateVerdict}
-            signals={preliminarySignals}
-            onClose={handleInvestigateClose}
-          />
-        </div>
-      )}
-
-      {/* Developer tools — collapsed by default */}
-      <div style={styles.devSection}>
-        <button
-          style={styles.devToggle}
-          onClick={() => setDevOpen((o) => !o)}
-          type="button"
-          aria-expanded={devOpen}
+      {/* ── Menu overlay ──────────────────────────────────────────────────── */}
+      {menuOpen && (
+        <div
+          className="menu-overlay"
+          onClick={() => setMenuOpen(false)}
+          role="dialog"
+          aria-label="Navigation menu"
+          aria-modal="true"
         >
-          {devOpen ? '▾' : '▸'} Developer tools
-        </button>
-        {devOpen && (
-          <div style={styles.devContent}>
-            <DevTestPanel />
-            <div style={styles.devAgentRow}>
+          <div
+            className="menu-sheet"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={S.menuHeader}>
+              <span style={S.menuTitle}>Menu</span>
               <button
-                style={styles.devBtn}
+                style={S.menuClose}
+                onClick={() => setMenuOpen(false)}
                 type="button"
-                onClick={() => { runAgentTests(); }}
+                aria-label="Close menu"
               >
-                Run analyzeLink tests
-              </button>
-              <button
-                style={styles.devBtn}
-                type="button"
-                onClick={() => { runAgentDemo(); }}
-              >
-                Run agent demo (msg #1)
+                <X size={20} strokeWidth={1.75} />
               </button>
             </div>
-            <TestRunner />
+            <nav style={S.menuNav} aria-label="Site navigation">
+              <MenuLink
+                label="Check a message"
+                href="#"
+                active={page === 'check'}
+                onClick={() => navigate('#')}
+              />
+              <MenuLink
+                label="How accurate is it?"
+                href="#/accuracy"
+                active={page === 'dashboard'}
+                onClick={() => navigate('#/accuracy')}
+              />
+              <MenuLink
+                label="How your privacy is protected"
+                href="#/privacy"
+                active={page === 'privacy'}
+                onClick={() => navigate('#/privacy')}
+              />
+              <MenuLink
+                label="About ScamShield"
+                href="#/about"
+                active={page === 'about'}
+                onClick={() => navigate('#/about')}
+              />
+              {isDev && (
+                <>
+                  <div style={S.menuDivider} />
+                  <MenuLink
+                    label="Developer tools"
+                    href="#dev"
+                    onClick={() => { setMenuOpen(false); setDevOpen(true); navigate('#'); }}
+                  />
+                </>
+              )}
+            </nav>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      </>}
+      {/* ── Pages ─────────────────────────────────────────────────────────── */}
+
+      {page === 'dashboard' && (
+        <div className="page-scroll">
+          <Dashboard />
+        </div>
+      )}
+      {page === 'privacy' && <PrivacyPage />}
+      {page === 'about'   && <AboutPage />}
+
+      {/* ── Check page ────────────────────────────────────────────────────── */}
+      {page === 'check' && (
+        <main className="check-main">
+
+          {/* Model status strip */}
+          <ModelStatus
+            availability={isDownloading ? 'downloading' : availability}
+            isDownloading={isDownloading}
+            downloadProgress={downloadProgress}
+            onDownloadRequest={handlePreload}
+          />
+
+          {/* Chat thread */}
+          <div className="chat-thread">
+            <div className="chat-inner">
+
+              {/* ── Welcome state ── */}
+              {!text && appState === 'idle' && !result && (
+                <>
+                  <WelcomeBubble />
+                  <div style={S.exampleRow} role="list" aria-label="Example messages">
+                    {EXAMPLES.map((ex) => (
+                      <button
+                        key={ex.label}
+                        style={S.exampleChip}
+                        type="button"
+                        role="listitem"
+                        onClick={() => handleTextChange(ex.text)}
+                      >
+                        Try: {ex.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* ── User message bubble ── */}
+              {text && appState !== 'idle' && (
+                <div style={S.userRow} aria-label="Your message">
+                  <div style={S.userBubble}>{text}</div>
+                </div>
+              )}
+
+              {/* ── Preliminary signals while checking ── */}
+              {uniqueSignals.length > 0 && appState === 'checking' && (
+                <PrelimBubble signals={uniqueSignals} />
+              )}
+
+              {/* ── Typing indicator ── */}
+              {appState === 'checking' && (
+                <TypingBubble label={checkingLabel} />
+              )}
+              {appState === 'masking' && (
+                <TypingBubble label="Hiding your personal details on this phone…" />
+              )}
+              {investigateState === 'masking' && (
+                <TypingBubble label="Hiding your personal details on this phone…" />
+              )}
+
+              {/* ── Download needed ── */}
+              {appState === 'needs_download' && (
+                <DownloadCard
+                  isDownloading={isDownloading}
+                  downloadProgress={downloadProgress}
+                  onDownload={handleDownloadAndCheck}
+                />
+              )}
+
+              {/* ── First check send preview ── */}
+              {appState === 'send_preview' && maskData && (
+                <SendPreview
+                  originalText={text}
+                  entities={maskData.entities}
+                  regexOnly={maskData.regexOnly}
+                  onSend={handleCloudSendConfirm}
+                  onCancel={handleCloudSendCancel}
+                />
+              )}
+
+              {/* ── Error ── */}
+              {appState === 'error' && errorMsg && (
+                <div style={S.errorBubble} role="alert" aria-live="assertive">
+                  <strong>Couldn't check the message.</strong> {errorMsg}
+                </div>
+              )}
+
+              {/* ── Result ── */}
+              {appState === 'done' && result && (
+                <VerdictCard
+                  result={result}
+                  originalText={text}
+                  onInvestigate={
+                    investigateState === 'idle'
+                      ? () => handleInvestigateRequest(result)
+                      : undefined
+                  }
+                />
+              )}
+
+              {/* ── Agent: send preview ── */}
+              {investigateState === 'send_preview' && investigateMaskData && (
+                <SendPreview
+                  originalText={text}
+                  entities={investigateMaskData.entities}
+                  regexOnly={investigateMaskData.regexOnly}
+                  onSend={handleInvestigateSendConfirm}
+                  onCancel={handleInvestigateSendCancel}
+                />
+              )}
+
+              {/* ── Agent panel ── */}
+              {investigateState === 'running' && investigateMaskedText && (
+                <AgentPanel
+                  maskedText={investigateMaskedText}
+                  deviceVerdict={investigateVerdict}
+                  signals={preliminarySignals}
+                  onClose={handleInvestigateClose}
+                />
+              )}
+
+              {/* ── Dev tools (collapsed) ── */}
+              {isDev && (
+                <div style={S.devSection}>
+                  <button
+                    style={S.devToggle}
+                    onClick={() => setDevOpen((o) => !o)}
+                    type="button"
+                    aria-expanded={devOpen}
+                  >
+                    {devOpen ? '▾' : '▸'} Developer tools
+                  </button>
+                  {devOpen && (
+                    <div style={S.devContent}>
+                      <DevTestPanel />
+                      <div style={S.devRow}>
+                        <button style={S.devBtn} type="button" onClick={() => runAgentTests()}>
+                          Run link tests
+                        </button>
+                        <button style={S.devBtn} type="button" onClick={() => runAgentDemo()}>
+                          Run agent demo
+                        </button>
+                      </div>
+                      <TestRunner />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div ref={bottomRef} />
+            </div>
+          </div>
+
+          {/* ── Pinned composer ── */}
+          <div className="composer-wrap">
+            <div className="composer-inner">
+              <MessageInput
+                value={text}
+                onChange={handleTextChange}
+                onCheck={handleCheck}
+                onClear={handleClear}
+                disabled={isChecking || isDownloading}
+              />
+            </div>
+          </div>
+
+        </main>
+      )}
     </div>
   );
 }
 
-function PreliminaryCard({ signals }) {
-  const riskSignals = signals.signals.filter((s) => s.weight > 0 && s.phrase);
-  const seen = new Set();
-  const unique = riskSignals.filter((s) => {
-    if (seen.has(s.id)) return false;
-    seen.add(s.id);
-    return true;
-  });
-  const count = unique.length;
+// ── Sub-components ──────────────────────────────────────────────────────────
 
+function WelcomeBubble() {
   return (
-    <div style={prelStyles.box}>
-      <div style={prelStyles.header}>
+    <div style={S.welcomeBubble} role="status">
+      <p style={S.welcomeText}>
+        Hi! Paste any message you're unsure about — a WhatsApp message, SMS or email.
+        I'll check it on your phone first. Nothing is uploaded unless you say so.
+      </p>
+      <p style={{ ...S.welcomeText, marginTop: 8, opacity: 0.75 }}>
+        Check any message before you trust it.
+      </p>
+    </div>
+  );
+}
+
+function PrelimBubble({ signals }) {
+  const count = signals.length;
+  return (
+    <div style={S.prelimBubble} role="status" aria-live="polite">
+      <div style={S.prelimHeading}>
         {count > 0
-          ? `⚡ ${count} warning sign${count > 1 ? 's' : ''} detected instantly`
-          : '⚡ No obvious warning signs — AI review in progress…'}
+          ? `I can already see ${count} warning sign${count > 1 ? 's' : ''}:`
+          : 'No obvious warning signs yet — still checking…'}
       </div>
-      {unique.length > 0 && (
-        <ul style={prelStyles.list}>
-          {unique.slice(0, 4).map((s) => (
-            <li key={s.id} style={prelStyles.item}>
-              <span style={prelStyles.label}>{s.label}</span>
-              {s.phrase && <span style={prelStyles.phrase}>"{s.phrase}"</span>}
+      {count > 0 && (
+        <ul style={S.prelimList}>
+          {signals.slice(0, 4).map((s) => (
+            <li key={s.id} style={S.prelimItem}>
+              <strong>{s.label}</strong>
+              {s.phrase && <span style={S.prelimPhrase}> — "{s.phrase}"</span>}
             </li>
           ))}
         </ul>
       )}
-      {count > 0 && <div style={prelStyles.footer}>AI review in progress…</div>}
+      <div style={S.prelimFooter}>AI review in progress…</div>
     </div>
   );
 }
 
-const prelStyles = {
-  box: {
-    background: '#fffbeb',
-    border: '1px solid #fcd34d',
-    borderRadius: 8,
-    padding: '12px 16px',
-    marginTop: 12,
-  },
-  header: {
-    fontSize: '0.875rem',
-    fontWeight: 600,
-    color: '#92400e',
-  },
-  list: {
-    margin: '8px 0 4px',
-    paddingLeft: 18,
-  },
-  item: {
-    fontSize: '0.82rem',
-    color: '#78350f',
-    marginBottom: 3,
-  },
-  label: {
-    fontWeight: 600,
-    marginRight: 6,
-  },
-  phrase: {
-    fontStyle: 'italic',
-    opacity: 0.85,
-  },
-  footer: {
-    fontSize: '0.75rem',
-    color: '#a16207',
-    marginTop: 6,
-  },
-};
+function TypingBubble({ label }) {
+  return (
+    <div style={S.typingBubble} aria-live="polite" aria-label={label}>
+      <div className="typing-dots">
+        <div className="typing-dot" />
+        <div className="typing-dot" />
+        <div className="typing-dot" />
+      </div>
+      {label && <span style={S.typingLabel}>{label}</span>}
+    </div>
+  );
+}
 
-const styles = {
-  container: {
-    maxWidth: 680,
-    margin: '0 auto',
-    padding: '0 20px 60px',
-  },
-  containerWide: {
-    margin: '0 auto',
-    padding: '0 0 60px',
-  },
-  nav: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 20,
-    padding: '14px 20px',
-    borderBottom: '1px solid #e5e7eb',
-    marginBottom: 32,
-    flexWrap: 'wrap',
-  },
-  navBrand: {
-    fontWeight: 700,
-    fontSize: '1rem',
-    color: '#111827',
-    marginRight: 'auto',
-  },
-  navLinks: {
-    display: 'flex',
-    gap: 4,
-  },
-  navLink: {
-    padding: '6px 14px',
-    fontSize: '0.875rem',
-    color: '#6b7280',
-    textDecoration: 'none',
-    borderRadius: 6,
-    fontWeight: 500,
-  },
-  navLinkActive: {
-    padding: '6px 14px',
-    fontSize: '0.875rem',
-    color: '#1d4ed8',
-    textDecoration: 'none',
-    borderRadius: 6,
-    fontWeight: 700,
-    background: '#eff6ff',
-  },
-  header: {
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: '1.75rem',
-    marginBottom: 6,
-  },
-  subtitle: {
-    color: '#6b7280',
-    fontSize: '0.95rem',
-    margin: 0,
-    lineHeight: 1.5,
-  },
-  progressBox: {
+function DownloadCard({ isDownloading, downloadProgress, onDownload }) {
+  return (
+    <div style={S.downloadCard} role="region" aria-label="Download private checker">
+      <p style={S.downloadText}>
+        To check this message privately on your phone, you need to download the private checker
+        once. It stays on your phone and works offline after that.
+      </p>
+      {isDownloading ? (
+        <div style={S.dlProgressRow}>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${downloadProgress}%` }} />
+          </div>
+          <span style={S.dlPct}>{downloadProgress}%</span>
+        </div>
+      ) : (
+        <button style={S.dlBtn} onClick={onDownload} type="button">
+          Download and check
+        </button>
+      )}
+    </div>
+  );
+}
+
+function MenuLink({ label, href, active, onClick }) {
+  return (
+    <a
+      href={href}
+      style={{ ...S.menuLink, ...(active ? S.menuLinkActive : {}) }}
+      onClick={(e) => { e.preventDefault(); onClick?.(); }}
+      aria-current={active ? 'page' : undefined}
+    >
+      {label}
+    </a>
+  );
+}
+
+// ── Styles ──────────────────────────────────────────────────────────────────
+
+const S = {
+  /* Top bar */
+  brandLink: {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
-    padding: '10px 14px',
-    marginTop: 12,
-    background: '#eff6ff',
-    border: '1px solid #bfdbfe',
-    borderRadius: 8,
-    fontSize: '0.875rem',
-    color: '#1e3a8a',
+    textDecoration: 'none',
+    flex: 1,
   },
-  maskingBox: {
+  brandName: {
+    fontFamily: 'var(--font-heading)',
+    fontSize: '1.125rem',
+    fontWeight: 600,
+    color: '#EFE8F4',
+    letterSpacing: '-0.01em',
+  },
+  newCheckBtn: {
+    padding: '6px 14px',
+    fontSize: '0.875rem',
+    fontWeight: 600,
+    background: 'rgba(239,232,244,0.15)',
+    color: '#EFE8F4',
+    border: '1px solid rgba(239,232,244,0.3)',
+    borderRadius: 'var(--r-btn)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    flexShrink: 0,
+    minHeight: 36,
+  },
+  menuBtn: {
     display: 'flex',
     alignItems: 'center',
-    gap: 10,
-    padding: '10px 14px',
-    marginTop: 12,
-    background: '#f0fdf4',
-    border: '1px solid #bbf7d0',
-    borderRadius: 8,
-    fontSize: '0.875rem',
-    color: '#14532d',
-  },
-  progressDot: {
-    display: 'inline-block',
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    background: '#3b82f6',
-    animation: 'pulse 1.2s ease-in-out infinite',
+    justifyContent: 'center',
+    width: 40,
+    height: 40,
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    padding: 0,
     flexShrink: 0,
   },
-  progressText: {
-    flex: 1,
+
+  /* Menu */
+  menuHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '18px 20px 12px',
+    borderBottom: '1px solid var(--line)',
   },
-  progressStats: {
-    fontSize: '0.82rem',
-    opacity: 0.8,
-    whiteSpace: 'nowrap',
+  menuTitle: {
+    fontFamily: 'var(--font-heading)',
+    fontSize: '1.0625rem',
+    color: 'var(--plum-900)',
   },
-  downloadPrompt: {
-    background: '#eff6ff',
-    border: '1px solid #bfdbfe',
+  menuClose: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    padding: 6,
+    color: 'var(--ink)',
     borderRadius: 8,
-    padding: '14px 16px',
-    marginTop: 14,
   },
-  downloadPromptText: {
-    margin: '0 0 12px',
+  menuNav: {
+    display: 'flex',
+    flexDirection: 'column',
+    padding: '12px 0',
+  },
+  menuLink: {
+    display: 'block',
+    padding: '14px 20px',
+    fontSize: '1rem',
+    color: 'var(--ink)',
+    textDecoration: 'none',
+    borderLeft: '3px solid transparent',
+    lineHeight: 1.4,
+  },
+  menuLinkActive: {
+    color: 'var(--plum-700)',
+    fontWeight: 700,
+    borderLeftColor: 'var(--plum-700)',
+    background: 'var(--plum-100)',
+  },
+  menuDivider: {
+    height: 1,
+    background: 'var(--line)',
+    margin: '8px 20px',
+  },
+
+  /* Welcome */
+  welcomeBubble: {
+    padding: '16px 18px',
+    background: 'var(--plum-100)',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: '90%',
+  },
+  welcomeText: {
+    fontSize: '0.9375rem',
+    lineHeight: 1.6,
+    color: 'var(--plum-900)',
+    margin: 0,
+  },
+
+  /* Examples */
+  exampleRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingLeft: 4,
+  },
+  exampleChip: {
+    padding: '8px 14px',
     fontSize: '0.875rem',
-    color: '#1e3a8a',
-    lineHeight: 1.5,
+    background: '#fff',
+    color: 'var(--plum-700)',
+    border: '1px solid var(--plum-100)',
+    borderRadius: 'var(--r-chip)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minHeight: 40,
   },
-  progressRow: {
+
+  /* User bubble */
+  userRow: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+  },
+  userBubble: {
+    padding: '12px 16px',
+    background: 'var(--plum-700)',
+    color: '#fff',
+    borderRadius: 'var(--r-bubble-out)',
+    fontSize: '0.9375rem',
+    lineHeight: 1.55,
+    maxWidth: '82%',
+    wordBreak: 'break-word',
+    whiteSpace: 'pre-wrap',
+  },
+
+  /* Preliminary signals */
+  prelimBubble: {
+    padding: '12px 16px',
+    background: 'var(--warn-bg)',
+    border: '1px solid #FDE68A',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: '90%',
+  },
+  prelimHeading: {
+    fontSize: '0.9375rem',
+    fontWeight: 700,
+    color: 'var(--warn)',
+    marginBottom: 6,
+  },
+  prelimList: {
+    listStyle: 'none',
+    margin: '0 0 6px',
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  prelimItem: {
+    fontSize: '0.875rem',
+    color: '#78350f',
+    lineHeight: 1.4,
+  },
+  prelimPhrase: {
+    fontStyle: 'italic',
+  },
+  prelimFooter: {
+    fontSize: '0.8125rem',
+    color: '#a16207',
+    fontStyle: 'italic',
+  },
+
+  /* Typing bubble */
+  typingBubble: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '10px 14px',
+    background: 'var(--plum-100)',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: '80%',
+  },
+  typingLabel: {
+    fontSize: '0.875rem',
+    color: '#888',
+  },
+
+  /* Download card */
+  downloadCard: {
+    padding: '16px 18px',
+    background: 'var(--plum-100)',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: '90%',
+  },
+  downloadText: {
+    fontSize: '0.9375rem',
+    lineHeight: 1.55,
+    color: 'var(--plum-900)',
+    marginBottom: 14,
+  },
+  dlProgressRow: {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
   },
-  progressTrack: {
-    flex: 1,
-    height: 8,
-    background: '#bfdbfe',
-    borderRadius: 99,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    background: '#1d4ed8',
-    borderRadius: 99,
-    transition: 'width 0.3s ease',
-  },
-  progressLabel: {
-    fontSize: '0.82rem',
-    color: '#1e3a8a',
+  dlPct: {
+    fontSize: '0.875rem',
+    color: 'var(--plum-700)',
+    fontWeight: 600,
     minWidth: 36,
     textAlign: 'right',
   },
   dlBtn: {
-    padding: '8px 18px',
-    fontSize: '0.875rem',
-    fontWeight: 600,
-    background: '#1d4ed8',
+    padding: '10px 20px',
+    fontSize: '0.9375rem',
+    fontWeight: 700,
+    background: 'var(--plum-700)',
     color: '#fff',
     border: 'none',
-    borderRadius: 6,
+    borderRadius: 'var(--r-btn)',
     cursor: 'pointer',
     fontFamily: 'inherit',
+    minHeight: 48,
   },
-  sendPreviewWrap: {
-    marginTop: 16,
-  },
-  errorBox: {
-    background: '#fef2f2',
-    border: '1px solid #fca5a5',
-    borderRadius: 8,
+
+  /* Error bubble */
+  errorBubble: {
     padding: '12px 16px',
-    marginTop: 14,
-    fontSize: '0.875rem',
-    color: '#991b1b',
+    background: 'var(--scam-bg)',
+    border: '1px solid #FECACA',
+    borderRadius: 'var(--r-bubble-in)',
+    fontSize: '0.9375rem',
+    color: 'var(--scam)',
+    maxWidth: '90%',
     lineHeight: 1.5,
   },
-  resultWrap: {
-    marginTop: 20,
-  },
-  investigateWrap: {
-    marginTop: 20,
-  },
+
+  /* Dev section */
   devSection: {
     marginTop: 48,
-    borderTop: '1px solid #e5e7eb',
     paddingTop: 20,
+    borderTop: '1px solid var(--line)',
   },
-  devAgentRow: {
+  devToggle: {
+    background: 'none',
+    border: 'none',
+    color: '#aaa',
+    fontSize: '0.875rem',
+    cursor: 'pointer',
+    padding: 0,
+    fontFamily: 'inherit',
+  },
+  devContent: {
+    marginTop: 8,
+  },
+  devRow: {
     display: 'flex',
     gap: 8,
     marginBottom: 16,
@@ -725,22 +886,10 @@ const styles = {
     padding: '6px 12px',
     fontSize: '0.8rem',
     background: '#f3f4f6',
-    border: '1px solid #d1d5db',
-    borderRadius: 6,
+    border: '1px solid var(--line)',
+    borderRadius: 8,
     cursor: 'pointer',
     fontFamily: 'inherit',
     color: '#374151',
-  },
-  devToggle: {
-    background: 'none',
-    border: 'none',
-    color: '#9ca3af',
-    fontSize: '0.875rem',
-    cursor: 'pointer',
-    padding: 0,
-    fontFamily: 'inherit',
-  },
-  devContent: {
-    marginTop: 8,
   },
 };

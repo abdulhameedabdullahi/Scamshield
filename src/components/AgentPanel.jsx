@@ -1,40 +1,42 @@
-// AgentPanel — live step-by-step investigation using the ScamShield agent.
+// AgentPanel — live step-by-step investigation using the ScamShield Agent.
+// Renders as a series of ScamShield chat bubbles inside the conversation thread.
 //
-// Props:
-//   maskedText    — already-masked message text (from SendPreview)
-//   deviceVerdict — { verdict, confidence, category, explanation, redFlags }
-//   signals       — { signals, ruleScore } from analyzeSignals()
-//   onClose       — () => void
+// Props: maskedText, deviceVerdict, signals, onClose
 
 import { useState, useEffect, useRef } from 'react';
 import { runAgent, continueAgent } from '../agent/runAgent';
 
-// Tool icons shown in the step timeline
-const TOOL_ICONS = {
+const TOOL_LABEL = {
+  analyze_link:            'Checking the link',
+  check_community_reports: 'Checking community reports',
+  search_web:              'Searching online',
+  get_scam_trends:         'Checking current scam patterns',
+};
+
+const TOOL_ICON = {
   analyze_link:            '🔎',
   check_community_reports: '📊',
   search_web:              '🌐',
   get_scam_trends:         '📈',
 };
 
-const VERDICT_COLORS = {
-  scam:       { bg: '#fef2f2', border: '#fca5a5', badge: '#dc2626', text: '#7f1d1d' },
-  suspicious: { bg: '#fffbeb', border: '#fcd34d', badge: '#d97706', text: '#78350f' },
-  safe:       { bg: '#f0fdf4', border: '#86efac', badge: '#16a34a', text: '#14532d' },
+const VERDICT_CFG = {
+  scam:       { bg: 'var(--scam-bg)',  border: '#FECACA', color: 'var(--scam)',  label: '🚨 Scam confirmed'     },
+  suspicious: { bg: 'var(--warn-bg)',  border: '#FDE68A', color: 'var(--warn)',  label: '⚠️ Suspicious'          },
+  safe:       { bg: 'var(--safe-bg)',  border: '#A7F3D0', color: 'var(--safe)',  label: '✅ Looks safe'          },
 };
 
 export default function AgentPanel({ maskedText, deviceVerdict, signals, onClose }) {
-  const [steps, setSteps]           = useState([]);
-  const [finalResult, setFinalResult] = useState(null);
-  const [agentSession, setAgentSession] = useState(null);
-  const [running, setRunning]       = useState(true);
-  const [error, setError]           = useState(null);
-  const [followUp, setFollowUp]     = useState('');
+  const [steps, setSteps]                   = useState([]);
+  const [finalResult, setFinalResult]       = useState(null);
+  const [agentSession, setAgentSession]     = useState(null);
+  const [running, setRunning]               = useState(true);
+  const [error, setError]                   = useState(null);
+  const [followUp, setFollowUp]             = useState('');
   const [followUpLoading, setFollowUpLoading] = useState(false);
-  const [followUpHistory, setFollowUpHistory] = useState([]); // [{role, text}]
+  const [followUpHistory, setFollowUpHistory] = useState([]);
   const bottomRef = useRef(null);
 
-  // Start the agent on mount
   useEffect(() => {
     let cancelled = false;
 
@@ -44,7 +46,7 @@ export default function AgentPanel({ maskedText, deviceVerdict, signals, onClose
         setFinalResult(event.result);
         setRunning(false);
       } else if (event.type === 'error') {
-        setError(event.summary ?? 'Investigation failed');
+        setError(event.summary ?? 'Investigation failed. Check your internet and try again.');
         setRunning(false);
       } else {
         setSteps((prev) => [...prev, event]);
@@ -53,39 +55,36 @@ export default function AgentPanel({ maskedText, deviceVerdict, signals, onClose
       .then(({ session }) => { if (!cancelled) setAgentSession(session); })
       .catch((err) => {
         if (cancelled) return;
-        setError(err?.message ?? 'Investigation failed. Please try again.');
+        setError(err?.message ?? 'Investigation failed. Check your internet and try again.');
         setRunning(false);
       });
 
     return () => { cancelled = true; };
   }, [maskedText, deviceVerdict, signals]);
 
-  // Scroll to bottom as steps arrive
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [steps, finalResult, followUpHistory]);
 
   async function handleFollowUp() {
-    const text = followUp.trim();
-    if (!text || !agentSession || followUpLoading) return;
+    const txt = followUp.trim();
+    if (!txt || !agentSession || followUpLoading) return;
     setFollowUp('');
     setFollowUpLoading(true);
-
     try {
       const { text: responseText, maskedFollowUp } = await continueAgent(
-        agentSession,
-        text,
+        agentSession, txt,
         (event) => setSteps((prev) => [...prev, event]),
       );
       setFollowUpHistory((prev) => [
         ...prev,
-        { role: 'user', text: maskedFollowUp, originalText: text },
+        { role: 'user', text: maskedFollowUp, originalText: txt },
         { role: 'assistant', text: responseText },
       ]);
     } catch (err) {
       setFollowUpHistory((prev) => [
         ...prev,
-        { role: 'error', text: err?.message ?? 'Follow-up failed. Please try again.' },
+        { role: 'error', text: err?.message ?? 'Couldn\'t get a reply. Check your internet and try again.' },
       ]);
     } finally {
       setFollowUpLoading(false);
@@ -100,68 +99,66 @@ export default function AgentPanel({ maskedText, deviceVerdict, signals, onClose
   }
 
   return (
-    <div style={s.wrap}>
-      {/* Header */}
-      <div style={s.header}>
-        <div>
-          <div style={s.headerTitle}>ScamShield Agent</div>
-          <div style={s.badge}>
-            ☁️ Agent reasoning in the cloud · 🔒 tools run on your device · masked text only
-          </div>
-        </div>
-        <button style={s.closeBtn} onClick={onClose} type="button" aria-label="Close">✕</button>
+    <div style={S.wrap}>
+      {/* Badge */}
+      <div style={S.badge}>
+        ☁️ Agent reasoning online &nbsp;·&nbsp; 🔒 tools run on this phone &nbsp;·&nbsp; masked text only
       </div>
 
       {/* Step timeline */}
-      <div style={s.timeline}>
+      <div style={S.timeline}>
         {steps.map((ev, i) => <StepRow key={i} event={ev} />)}
 
         {running && (
-          <div style={s.runningRow}>
-            <span style={s.dot} />
-            <span style={s.runningText}>
-              {steps.length === 0 ? 'Starting investigation…' : 'Reasoning…'}
+          <div style={S.typingRow}>
+            <div className="typing-dots">
+              <div className="typing-dot" />
+              <div className="typing-dot" />
+              <div className="typing-dot" />
+            </div>
+            <span style={S.typingLabel}>
+              {steps.length === 0 ? 'Starting investigation…' : 'Thinking…'}
             </span>
           </div>
         )}
 
         {error && (
-          <div style={s.errorBox}>
-            <strong>Error:</strong> {error}
+          <div style={S.errorBubble} role="alert">
+            <strong>Couldn't finish the investigation.</strong> {error}
           </div>
         )}
 
-        {/* Final result card */}
-        {finalResult && <FinalResultCard result={finalResult} steps={steps} />}
+        {finalResult && <FinalResultBubble result={finalResult} />}
 
         {/* Follow-up history */}
         {followUpHistory.map((msg, i) => (
           <div key={i}>
             {msg.role === 'user' && (
-              <div style={s.userRow}>
+              <div style={S.userRow}>
                 {msg.text !== msg.originalText && (
-                  <div style={s.maskedNote}>Personal numbers masked automatically</div>
+                  <div style={S.maskedNote}>Personal numbers hidden automatically</div>
                 )}
-                <div style={s.userBubble}>{msg.text}</div>
+                <div style={S.userBubble}>{msg.text}</div>
               </div>
             )}
             {msg.role === 'assistant' && (
-              <div style={s.assistantMsg}>
+              <div style={S.assistantBubble}>
                 <SimpleMarkdown text={msg.text} />
               </div>
             )}
             {msg.role === 'error' && (
-              <div style={{ ...s.errorBox, margin: '8px 0' }}>
-                {msg.text}
-              </div>
+              <div style={S.errorBubble}>{msg.text}</div>
             )}
           </div>
         ))}
 
         {followUpLoading && (
-          <div style={s.runningRow}>
-            <span style={s.dot} />
-            <span style={s.runningText}>Thinking…</span>
+          <div style={S.typingRow}>
+            <div className="typing-dots">
+              <div className="typing-dot" />
+              <div className="typing-dot" />
+              <div className="typing-dot" />
+            </div>
           </div>
         )}
 
@@ -170,31 +167,38 @@ export default function AgentPanel({ maskedText, deviceVerdict, signals, onClose
 
       {/* Follow-up input */}
       {!running && agentSession && !error && (
-        <>
-          <div style={s.inputRow}>
+        <div style={S.followUpWrap}>
+          <div style={S.followUpBox}>
             <textarea
-              style={s.textarea}
+              style={S.followUpTextarea}
               value={followUp}
               onChange={(e) => setFollowUp(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask a follow-up question… (Enter to send)"
+              placeholder="Ask a follow-up question…"
               rows={2}
               disabled={followUpLoading}
+              aria-label="Follow-up question"
             />
             <button
-              style={{ ...s.sendBtn, opacity: !followUp.trim() ? 0.5 : 1 }}
+              style={{ ...S.followUpSend, opacity: followUp.trim() ? 1 : 0.4 }}
               onClick={handleFollowUp}
               type="button"
               disabled={!followUp.trim() || followUpLoading}
+              aria-label="Send follow-up"
             >
               Send
             </button>
           </div>
-          <div style={s.inputNote}>
-            Phone numbers and other identifiers you type are masked before sending.
-          </div>
-        </>
+          <p style={S.followUpNote}>
+            Phone numbers you type are hidden before sending.
+          </p>
+        </div>
       )}
+
+      {/* Close */}
+      <button style={S.closeBtn} onClick={onClose} type="button" aria-label="Close investigation">
+        Close investigation
+      </button>
     </div>
   );
 }
@@ -202,44 +206,44 @@ export default function AgentPanel({ maskedText, deviceVerdict, signals, onClose
 // ── Step row ───────────────────────────────────────────────────────────────
 
 function StepRow({ event }) {
+  const isDone = event.type === 'tool_result';
+  const hasError = isDone && !!event.result?.error;
+  const isDemo = event.tool === 'check_community_reports' && event.result?.demo;
+
   if (event.type === 'thinking') {
     return (
-      <div style={s.stepRow}>
-        <span style={s.stepIcon}>💭</span>
-        <span style={s.stepText}>{event.summary}</span>
+      <div style={S.stepBubble}>
+        <span style={S.stepIcon}>💭</span>
+        <span style={S.stepText}>{event.summary}</span>
       </div>
     );
   }
 
   if (event.type === 'tool_call') {
-    const icon = TOOL_ICONS[event.tool] ?? '⚙️';
+    const icon = TOOL_ICON[event.tool] ?? '⚙️';
+    const label = TOOL_LABEL[event.tool] ?? event.tool;
     return (
-      <div style={s.stepRow}>
-        <span style={s.stepIcon}>{icon}</span>
-        <span style={s.stepText}>{event.summary}</span>
-        {event.args && Object.keys(event.args).length > 0 && (
-          <span style={s.stepArgs}>{formatArgs(event.args)}</span>
-        )}
+      <div style={S.stepBubble}>
+        <span style={S.stepIcon}>{icon}</span>
+        <span style={S.stepText}>{label}…</span>
       </div>
     );
   }
 
   if (event.type === 'tool_result') {
-    const hasError = !!event.result?.error;
     return (
-      <div style={{ ...s.stepRow, ...s.stepResultRow }}>
-        <span style={s.stepIcon}>{hasError ? '⚠️' : '✓'}</span>
-        <span style={{ ...s.stepText, color: hasError ? '#dc2626' : '#374151' }}>
+      <div style={{ ...S.stepBubble, ...S.stepDone }}>
+        <span style={S.stepIcon}>{hasError ? '⚠️' : '✓'}</span>
+        <span style={{ ...S.stepText, color: hasError ? 'var(--scam)' : undefined }}>
           {event.summary}
         </span>
-        <span style={s.durationBadge}>{event.durationMs}ms</span>
-        {/* Show search sources inline */}
+        {isDemo && <span style={S.demoTag}>demo data</span>}
+        <span style={S.duration}>{event.durationMs}ms</span>
         {event.tool === 'search_web' && event.result?.sources?.length > 0 && (
-          <SourcesList sources={event.result.sources} renderedContent={event.result.renderedContent} />
-        )}
-        {/* Flag community reports as demo */}
-        {event.tool === 'check_community_reports' && event.result?.demo && (
-          <span style={s.demoBadge}>demo data</span>
+          <SourcesList
+            sources={event.result.sources}
+            renderedContent={event.result.renderedContent}
+          />
         )}
       </div>
     );
@@ -248,44 +252,40 @@ function StepRow({ event }) {
   return null;
 }
 
-function formatArgs(args) {
-  const entries = Object.entries(args).slice(0, 2);
-  return entries.map(([k, v]) => `${k}: "${String(v).slice(0, 60)}"`).join(', ');
-}
+// ── Final result bubble ────────────────────────────────────────────────────
 
-// ── Final result card ──────────────────────────────────────────────────────
-
-function FinalResultCard({ result }) {
-  const vc = VERDICT_COLORS[result.verdict] ?? VERDICT_COLORS.suspicious;
-  const verdictLabel = { scam: 'SCAM', suspicious: 'SUSPICIOUS', safe: 'SAFE' }[result.verdict] ?? 'UNKNOWN';
+function FinalResultBubble({ result }) {
+  const vc = VERDICT_CFG[result.verdict] ?? VERDICT_CFG.suspicious;
 
   return (
-    <div style={{ ...s.finalCard, background: vc.bg, border: `1px solid ${vc.border}` }}>
-      <div style={s.finalHeader}>
-        <span style={{ ...s.verdictBadge, background: vc.badge }}>
-          {verdictLabel}
-        </span>
-        <span style={s.confidenceBadge}>{result.confidence} confidence</span>
-        <span style={s.agentTag}>Agent verdict</span>
+    <div
+      className="verdict-enter"
+      style={{ ...S.finalBubble, background: vc.bg, border: `1px solid ${vc.border}` }}
+      role="region"
+      aria-label="Agent verdict"
+    >
+      <div style={S.finalHeader}>
+        <span style={{ ...S.verdictBadge, color: vc.color }}>{vc.label}</span>
+        <span style={S.agentTag}>Agent verdict</span>
       </div>
 
-      <p style={{ ...s.finalSummary, color: vc.text }}>{result.summary}</p>
+      <p style={{ ...S.finalSummary, color: vc.color }}>{result.summary}</p>
 
       {result.scamTechnique && (
-        <div style={s.section}>
-          <div style={s.sectionLabel}>Scam technique</div>
-          <div style={{ ...s.sectionText, color: vc.text }}>{result.scamTechnique}</div>
+        <div style={S.finalSection}>
+          <div style={S.finalSectionLabel}>How this trick works</div>
+          <p style={S.finalSectionText}>{result.scamTechnique}</p>
         </div>
       )}
 
       {result.evidence?.length > 0 && (
-        <div style={s.section}>
-          <div style={s.sectionLabel}>Evidence gathered</div>
-          <ul style={s.evidenceList}>
+        <div style={S.finalSection}>
+          <div style={S.finalSectionLabel}>What I found</div>
+          <ul style={S.evidenceList}>
             {result.evidence.map((e, i) => (
-              <li key={i} style={s.evidenceItem}>
-                <span style={s.evidenceSource}>{TOOL_ICONS[e.source] ?? '•'} {e.source}</span>
-                <span style={{ color: vc.text }}>{e.finding}</span>
+              <li key={i} style={S.evidenceItem}>
+                <span style={S.evidenceSrc}>{TOOL_ICON[e.source] ?? '•'}</span>
+                <span>{e.finding}</span>
               </li>
             ))}
           </ul>
@@ -293,11 +293,14 @@ function FinalResultCard({ result }) {
       )}
 
       {result.nextSteps?.length > 0 && (
-        <div style={s.section}>
-          <div style={s.sectionLabel}>What to do</div>
-          <ul style={s.nextStepsList}>
+        <div style={S.finalSection}>
+          <div style={S.finalSectionLabel}>What to do now</div>
+          <ul style={S.nextList}>
             {result.nextSteps.map((step, i) => (
-              <li key={i} style={s.nextStepItem}>{step}</li>
+              <li key={i} style={S.nextItem}>
+                <span aria-hidden="true">☑</span>
+                <span>{step}</span>
+              </li>
             ))}
           </ul>
         </div>
@@ -306,14 +309,13 @@ function FinalResultCard({ result }) {
   );
 }
 
-// ── Sources list (from search_web grounding) ───────────────────────────────
+// ── Sources list ───────────────────────────────────────────────────────────
 
 function SourcesList({ sources, renderedContent }) {
   const entryRef = useRef(null);
 
   useEffect(() => {
     if (!entryRef.current || !renderedContent) return;
-    // Required by Google TOS: render grounding entry-point in isolated shadow DOM
     const root = entryRef.current.shadowRoot
       ?? entryRef.current.attachShadow({ mode: 'open' });
     root.innerHTML = renderedContent;
@@ -322,61 +324,51 @@ function SourcesList({ sources, renderedContent }) {
   if (!sources?.length && !renderedContent) return null;
 
   return (
-    <div style={s.sourcesWrap}>
+    <div style={S.sourcesWrap}>
       {sources.length > 0 && (
-        <div style={s.sourcesLabel}>Sources</div>
+        <ul style={S.sourcesList}>
+          {sources.map((src, i) => (
+            <li key={i} style={S.sourcesItem}>
+              <a href={src.uri} target="_blank" rel="noopener noreferrer" style={S.sourceLink}>
+                {src.title ?? src.uri}
+              </a>
+            </li>
+          ))}
+        </ul>
       )}
-      <ul style={s.sourcesList}>
-        {sources.map((src, i) => (
-          <li key={i} style={s.sourcesItem}>
-            <a
-              href={src.uri}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={s.sourceLink}
-            >
-              {src.title ?? src.uri}
-            </a>
-          </li>
-        ))}
-      </ul>
       {renderedContent && <div ref={entryRef} style={{ marginTop: 4 }} />}
     </div>
   );
 }
 
-// ── Simple markdown renderer (no library) ─────────────────────────────────
+// ── Simple markdown renderer ───────────────────────────────────────────────
 
 function SimpleMarkdown({ text }) {
   if (!text) return null;
   const lines = text.split('\n');
-  const elements = [];
+  const els = [];
   let i = 0;
-
   while (i < lines.length) {
     const line = lines[i];
-    if (line.startsWith('## ')) {
-      elements.push(<h3 key={i} style={md.h3}>{inlineParts(line.slice(3))}</h3>);
-    } else if (line.startsWith('### ')) {
-      elements.push(<h4 key={i} style={md.h4}>{inlineParts(line.slice(4))}</h4>);
-    } else if (line.startsWith('- ') || line.startsWith('* ')) {
+    if (line.startsWith('## '))       els.push(<h3 key={i} style={md.h3}>{inline(line.slice(3))}</h3>);
+    else if (line.startsWith('### ')) els.push(<h4 key={i} style={md.h4}>{inline(line.slice(4))}</h4>);
+    else if (line.startsWith('- ') || line.startsWith('* ')) {
       const items = [];
       while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('* '))) {
-        items.push(<li key={i} style={md.li}>{inlineParts(lines[i].slice(2))}</li>);
+        items.push(<li key={i} style={md.li}>{inline(lines[i].slice(2))}</li>);
         i++;
       }
-      elements.push(<ul key={`ul-${i}`} style={md.ul}>{items}</ul>);
+      els.push(<ul key={`ul-${i}`} style={md.ul}>{items}</ul>);
       continue;
     } else if (line.trim()) {
-      elements.push(<p key={i} style={md.p}>{inlineParts(line)}</p>);
+      els.push(<p key={i} style={md.p}>{inline(line)}</p>);
     }
     i++;
   }
-
-  return <div style={md.root}>{elements}</div>;
+  return <div style={md.root}>{els}</div>;
 }
 
-function inlineParts(text) {
+function inline(text) {
   return text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
     part.startsWith('**') && part.endsWith('**')
       ? <strong key={i}>{part.slice(2, -2)}</strong>
@@ -385,9 +377,9 @@ function inlineParts(text) {
 }
 
 const md = {
-  root: { fontSize: '0.875rem', lineHeight: 1.65, color: '#1f2937' },
-  h3:   { margin: '14px 0 6px', fontSize: '0.9rem', fontWeight: 700 },
-  h4:   { margin: '10px 0 4px', fontSize: '0.85rem', fontWeight: 700 },
+  root: { fontSize: '0.9375rem', lineHeight: 1.6 },
+  h3:   { margin: '12px 0 5px', fontSize: '0.9375rem', fontWeight: 700 },
+  h4:   { margin: '10px 0 4px', fontSize: '0.875rem',  fontWeight: 700 },
   p:    { margin: '0 0 8px' },
   ul:   { margin: '0 0 8px', paddingLeft: 18 },
   li:   { marginBottom: 3 },
@@ -395,226 +387,179 @@ const md = {
 
 // ── Styles ─────────────────────────────────────────────────────────────────
 
-const s = {
+const S = {
   wrap: {
-    background: '#f8faff',
-    border: '1px solid #c7d7fe',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  header: {
     display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    padding: '14px 16px 10px',
-    background: '#4f46e5',
-    color: '#fff',
-  },
-  headerTitle: {
-    fontWeight: 700,
-    fontSize: '0.9rem',
-    marginBottom: 3,
+    flexDirection: 'column',
+    gap: 8,
+    maxWidth: '100%',
   },
   badge: {
-    fontSize: '0.7rem',
-    opacity: 0.9,
-  },
-  closeBtn: {
-    background: 'transparent',
-    border: 'none',
-    color: '#fff',
-    fontSize: '1rem',
-    cursor: 'pointer',
-    padding: '0 0 0 12px',
-    lineHeight: 1,
-    flexShrink: 0,
+    fontSize: '0.75rem',
+    color: '#888',
+    padding: '4px 2px',
+    textAlign: 'left',
   },
   timeline: {
-    padding: '16px 16px 8px',
-    maxHeight: 600,
-    overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
   },
-  stepRow: {
+  stepBubble: {
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'baseline',
-    gap: 6,
-    padding: '4px 0',
-    borderBottom: '1px solid #f1f5f9',
+    gap: 8,
+    padding: '10px 14px',
+    background: 'var(--plum-100)',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: '90%',
   },
-  stepResultRow: {
-    paddingLeft: 4,
+  stepDone: {
+    background: '#fff',
+    border: '1px solid var(--line)',
   },
   stepIcon: {
-    fontSize: '0.9rem',
-    width: 20,
+    fontSize: '1rem',
     flexShrink: 0,
   },
   stepText: {
-    fontSize: '0.82rem',
-    color: '#374151',
+    fontSize: '0.9375rem',
+    color: 'var(--ink)',
     flex: 1,
     minWidth: 100,
   },
-  stepArgs: {
-    fontSize: '0.72rem',
-    color: '#9ca3af',
-    fontFamily: 'monospace',
-  },
-  durationBadge: {
-    fontSize: '0.7rem',
-    color: '#9ca3af',
-    background: '#f3f4f6',
-    padding: '1px 5px',
-    borderRadius: 4,
-    flexShrink: 0,
-  },
-  demoBadge: {
-    fontSize: '0.65rem',
+  demoTag: {
+    fontSize: '0.75rem',
     color: '#fff',
-    background: '#6b7280',
-    padding: '1px 5px',
-    borderRadius: 4,
+    background: '#888',
+    padding: '2px 7px',
+    borderRadius: 'var(--r-chip)',
     flexShrink: 0,
   },
-  runningRow: {
+  duration: {
+    fontSize: '0.75rem',
+    color: '#aaa',
+    flexShrink: 0,
+  },
+  typingRow: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '6px 0',
-    color: '#6b7280',
-    fontSize: '0.82rem',
+    padding: '8px 14px',
+    background: 'var(--plum-100)',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: 120,
   },
-  dot: {
-    display: 'inline-block',
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    background: '#4f46e5',
-    animation: 'pulse 1.2s ease-in-out infinite',
-    flexShrink: 0,
-  },
-  runningText: {
-    color: '#6b7280',
-  },
-  errorBox: {
-    background: '#fef2f2',
-    border: '1px solid #fca5a5',
-    borderRadius: 7,
-    padding: '10px 12px',
+  typingLabel: {
     fontSize: '0.875rem',
-    color: '#991b1b',
+    color: '#888',
   },
-  finalCard: {
-    borderRadius: 8,
-    padding: '14px 16px',
-    marginTop: 10,
+  errorBubble: {
+    padding: '12px 16px',
+    background: 'var(--scam-bg)',
+    border: '1px solid #FECACA',
+    borderRadius: 'var(--r-bubble-in)',
+    fontSize: '0.9375rem',
+    color: 'var(--scam)',
+    maxWidth: '90%',
+  },
+  finalBubble: {
+    padding: '18px 20px',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: '96%',
   },
   finalHeader: {
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
     marginBottom: 10,
     flexWrap: 'wrap',
+    gap: 8,
   },
   verdictBadge: {
-    color: '#fff',
-    padding: '3px 10px',
-    borderRadius: 99,
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    letterSpacing: '0.05em',
-  },
-  confidenceBadge: {
-    fontSize: '0.75rem',
-    color: '#6b7280',
+    fontFamily: 'var(--font-heading)',
+    fontSize: '1.0625rem',
+    fontWeight: 600,
   },
   agentTag: {
-    fontSize: '0.68rem',
+    fontSize: '0.75rem',
     color: '#fff',
-    background: '#4f46e5',
-    padding: '2px 6px',
-    borderRadius: 4,
-    marginLeft: 'auto',
+    background: 'var(--plum-700)',
+    padding: '2px 8px',
+    borderRadius: 'var(--r-chip)',
   },
   finalSummary: {
-    fontSize: '0.875rem',
+    fontSize: '0.9375rem',
+    fontWeight: 600,
     lineHeight: 1.5,
-    margin: '0 0 12px',
-    fontWeight: 500,
+    marginBottom: 14,
   },
-  section: {
-    marginBottom: 10,
+  finalSection: {
+    marginBottom: 12,
   },
-  sectionLabel: {
-    fontSize: '0.7rem',
+  finalSectionLabel: {
+    fontSize: '0.8125rem',
     fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: '0.07em',
-    color: '#9ca3af',
-    marginBottom: 4,
+    color: '#666',
+    marginBottom: 5,
   },
-  sectionText: {
-    fontSize: '0.82rem',
+  finalSectionText: {
+    fontSize: '0.9375rem',
     lineHeight: 1.5,
+    margin: 0,
   },
   evidenceList: {
-    margin: 0,
-    paddingLeft: 0,
     listStyle: 'none',
+    padding: 0,
+    margin: 0,
     display: 'flex',
     flexDirection: 'column',
-    gap: 4,
+    gap: 6,
   },
   evidenceItem: {
     display: 'flex',
     gap: 8,
-    alignItems: 'baseline',
-    fontSize: '0.82rem',
+    fontSize: '0.9375rem',
     lineHeight: 1.4,
   },
-  evidenceSource: {
-    fontSize: '0.7rem',
-    color: '#6b7280',
-    whiteSpace: 'nowrap',
-    minWidth: 80,
+  evidenceSrc: {
     flexShrink: 0,
+    width: 20,
   },
-  nextStepsList: {
+  nextList: {
+    listStyle: 'none',
+    padding: 0,
     margin: 0,
-    paddingLeft: 18,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
   },
-  nextStepItem: {
-    fontSize: '0.82rem',
-    marginBottom: 4,
+  nextItem: {
+    display: 'flex',
+    gap: 8,
+    fontSize: '0.9375rem',
     lineHeight: 1.4,
   },
   sourcesWrap: {
-    marginTop: 6,
-    paddingTop: 6,
-    borderTop: '1px solid #e5e7eb',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTop: '1px solid var(--line)',
     width: '100%',
   },
-  sourcesLabel: {
-    fontSize: '0.65rem',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    color: '#9ca3af',
-    marginBottom: 3,
-  },
   sourcesList: {
+    listStyle: 'none',
+    padding: 0,
     margin: 0,
-    paddingLeft: 14,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 3,
   },
   sourcesItem: {
-    fontSize: '0.75rem',
-    marginBottom: 2,
+    fontSize: '0.8125rem',
   },
   sourceLink: {
-    color: '#1d4ed8',
+    color: 'var(--plum-700)',
     textDecoration: 'none',
     wordBreak: 'break-word',
   },
@@ -622,61 +567,80 @@ const s = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-end',
-    marginTop: 10,
+    marginTop: 6,
   },
   maskedNote: {
-    fontSize: '0.68rem',
-    color: '#9ca3af',
+    fontSize: '0.75rem',
+    color: '#aaa',
     marginBottom: 3,
     fontStyle: 'italic',
   },
   userBubble: {
-    background: '#1d4ed8',
+    background: 'var(--plum-700)',
     color: '#fff',
-    padding: '8px 12px',
-    borderRadius: 10,
-    borderBottomRightRadius: 3,
-    fontSize: '0.875rem',
-    maxWidth: '80%',
+    padding: '10px 14px',
+    borderRadius: 'var(--r-bubble-out)',
+    fontSize: '0.9375rem',
+    maxWidth: '82%',
     wordBreak: 'break-word',
   },
-  assistantMsg: {
-    marginTop: 10,
-    marginBottom: 4,
+  assistantBubble: {
+    padding: '12px 16px',
+    background: 'var(--plum-100)',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: '90%',
+    marginTop: 6,
   },
-  inputRow: {
+  followUpWrap: {
+    marginTop: 6,
+  },
+  followUpBox: {
     display: 'flex',
     gap: 8,
-    padding: '0 16px',
-    alignItems: 'flex-start',
+    alignItems: 'flex-end',
   },
-  textarea: {
+  followUpTextarea: {
     flex: 1,
-    padding: '8px 10px',
-    fontSize: '0.875rem',
-    fontFamily: 'inherit',
-    border: '1px solid #c7d2fe',
-    borderRadius: 7,
+    padding: '10px 12px',
+    fontSize: '0.9375rem',
+    fontFamily: 'var(--font-body)',
+    border: '1.5px solid var(--line)',
+    borderRadius: 'var(--r-input)',
     resize: 'none',
     outline: 'none',
     lineHeight: 1.5,
+    background: '#fff',
   },
-  sendBtn: {
-    padding: '8px 16px',
-    fontSize: '0.875rem',
-    fontWeight: 600,
-    background: '#4f46e5',
+  followUpSend: {
+    padding: '10px 18px',
+    fontSize: '0.9375rem',
+    fontWeight: 700,
+    background: 'var(--plum-700)',
     color: '#fff',
     border: 'none',
-    borderRadius: 7,
+    borderRadius: 'var(--r-btn)',
     cursor: 'pointer',
     fontFamily: 'inherit',
     flexShrink: 0,
+    minHeight: 48,
   },
-  inputNote: {
-    padding: '6px 16px 14px',
-    fontSize: '0.7rem',
-    color: '#9ca3af',
+  followUpNote: {
+    fontSize: '0.8125rem',
+    color: '#aaa',
+    marginTop: 4,
     fontStyle: 'italic',
+  },
+  closeBtn: {
+    padding: '10px 20px',
+    fontSize: '0.875rem',
+    background: 'transparent',
+    color: '#888',
+    border: '1px solid var(--line)',
+    borderRadius: 'var(--r-btn)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    minHeight: 44,
   },
 };
