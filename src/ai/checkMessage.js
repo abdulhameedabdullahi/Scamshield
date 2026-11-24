@@ -21,7 +21,7 @@
 //     source, durationMs, needsSecondOpinion, maskedText? }
 //
 //   redFlags = Array of { phrase, reason, source: 'ai'|'rule', start, end }
-//   needsSecondOpinion = verdict === 'suspicious' || confidence === 'low'
+//   needsSecondOpinion = verdict !== 'safe'
 
 import { onDeviceModel, cloudModel } from './models';
 import { getOnDeviceAvailability, initDeviceModel } from './availability';
@@ -183,7 +183,16 @@ function applyConsistency(analyzedText, aiResult, signals, ruleScore) {
     mergedFlags = ruleFlags.slice(0, 3);
   }
 
-  // 7. Safe enforcement
+  // 7. Strong safe signal with no positive rule evidence — force safe
+  // standard_alert already guards against links/credential_request before firing, so it's
+  // safe to override here when no positive rule flags were found.
+  const hasStrongSafe = signals.some((s) => s.id === 'do_not_share' || s.id === 'standard_alert');
+  if (hasStrongSafe && ruleFlags.length === 0 && verdict !== 'safe') {
+    verdict = 'safe';
+    confidence = 'medium';
+  }
+
+  // 8. Safe enforcement
   if (verdict === 'safe') {
     return {
       verdict,
@@ -195,7 +204,7 @@ function applyConsistency(analyzedText, aiResult, signals, ruleScore) {
     };
   }
 
-  const needsSecondOpinion = verdict === 'suspicious' || confidence === 'low';
+  const needsSecondOpinion = verdict !== 'safe';
 
   return {
     verdict,
@@ -356,4 +365,56 @@ export async function downloadAndCheck(text, onDownloadProgress, onChunk) {
  */
 export async function preloadDeviceModel(onProgress) {
   await initDeviceModel(onDeviceModel, onProgress);
+}
+
+/**
+ * Hybrid check: on-device Rules+AI first, then cloud second-opinion for non-safe results.
+ *
+ * - If on-device says 'safe' → done, nothing sent to cloud. Returns sentToCloud: false.
+ * - If on-device says 'scam'/'suspicious' → regexMask + cloudCheck; cloud verdict is final.
+ * - Veto: on-device rules found a strong signal (credential_request, ai_instruction, or
+ *   link + threat_or_block) AND cloud says safe → final verdict = suspicious.
+ *
+ * @param {string} text
+ * @param {(totalChars: number) => void} [onChunk]
+ * @returns {Promise<object>} Result with extra field sentToCloud: boolean
+ */
+export async function hybridCheck(text, onChunk) {
+  const start = Date.now();
+  const deviceResult = await onDeviceCheck(text, onChunk);
+
+  if (deviceResult.verdict === 'safe') {
+    return { ...deviceResult, sentToCloud: false };
+  }
+
+  // Identify strong on-device rule signals before escalating
+  const signals = deviceResult.signals ?? [];
+  const hasCredReq = signals.some((s) => s.id === 'credential_request');
+  const hasAiInstr = signals.some((s) => s.id === 'ai_instruction');
+  const hasLink    = signals.some((s) => s.id === 'link');
+  const hasThreat  = signals.some((s) => s.id === 'threat_or_block');
+  const hasStrongOnDevice = hasCredReq || hasAiInstr || (hasLink && hasThreat);
+
+  let cloudResult;
+  try {
+    cloudResult = await cloudCheck(text, onChunk);
+  } catch (err) {
+    console.warn('[ScamShield] Hybrid cloud check failed, returning on-device result:', err?.message);
+    return { ...deviceResult, sentToCloud: true, durationMs: Date.now() - start };
+  }
+
+  // Veto: strong on-device signal + cloud wrongly says safe → suspicious
+  if (hasStrongOnDevice && cloudResult.verdict === 'safe') {
+    return {
+      ...cloudResult,
+      verdict: 'suspicious',
+      confidence: 'medium',
+      explanation: 'On-device rule engine found strong risk signals that the cloud model did not confirm.',
+      needsSecondOpinion: true,
+      sentToCloud: true,
+      durationMs: Date.now() - start,
+    };
+  }
+
+  return { ...cloudResult, sentToCloud: true, durationMs: Date.now() - start };
 }

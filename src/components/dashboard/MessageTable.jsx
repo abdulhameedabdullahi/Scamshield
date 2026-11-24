@@ -55,6 +55,7 @@ export default function MessageTable({ messages }) {
               <th style={TH}>AI only</th>
               <th style={{ ...TH, color: '#1d4ed8' }}>Rules + AI ★</th>
               <th style={TH}>Cloud</th>
+              <th style={{ ...TH, color: '#7c3aed' }}>Hybrid</th>
             </tr>
           </thead>
           <tbody>
@@ -81,11 +82,12 @@ function Row({ msg }) {
       <td style={TD}><ResultCell r={msg.results?.aiOnly} /></td>
       <td style={TD}><ResultCell r={msg.results?.rulesAi} highlight /></td>
       <td style={TD}><ResultCell r={msg.results?.cloud} /></td>
+      <td style={TD}><ResultCell r={msg.results?.hybrid} showCloud /></td>
     </tr>
   );
 }
 
-function ResultCell({ r, highlight }) {
+function ResultCell({ r, highlight, showCloud }) {
   if (r == null) return <span style={{ color: '#d1d5db', fontSize: '0.75rem' }}>—</span>;
   if (r.error) {
     return (
@@ -102,6 +104,7 @@ function ResultCell({ r, highlight }) {
   return (
     <span style={{ color: ok ? '#166534' : '#dc2626', fontWeight: highlight ? 700 : 600, fontSize: '0.82rem' }}>
       {ok ? '✓' : '✗'} {r.verdict ?? '—'}
+      {showCloud && r.sentToCloud && <span style={{ marginLeft: 3, fontSize: '0.78rem' }}>☁️</span>}
     </span>
   );
 }

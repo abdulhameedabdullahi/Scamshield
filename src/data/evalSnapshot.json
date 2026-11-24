@@ -1,480 +1,477 @@
 {
-    "generatedAt": "2026-11-24T00:58:32.136Z",
-    "warmupMs": 33456,
-    "device": {
-      "chromeVersion": "159",
-      "onDeviceBackend": "unknown",
-      "deviceMemory": 16,
-      "hardwareConcurrency": 12
+  "generatedAt": "2026-11-24T08:30:04.249Z",
+  "warmupMs": 26845,
+  "device": {
+    "chromeVersion": "159",
+    "onDeviceBackend": "unknown",
+    "deviceMemory": 16,
+    "hardwareConcurrency": 12
+  },
+  "datasetSize": 20,
+  "modes": {
+    "aiOnly": {
+      "total": 20,
+      "correct": 5,
+      "accuracy": 25,
+      "fp": 4,
+      "fn": 0,
+      "errors": 0,
+      "scamTotal": 12,
+      "scamsCaught": 12,
+      "safeTotal": 7,
+      "falseAlarms": 4,
+      "avgMs": 33361,
+      "firstRunMs": 26668
     },
-    "datasetSize": 20,
-    "modes": {
-      "aiOnly": {
-        "total": 20,
-        "correct": 5,
-        "accuracy": 25,
-        "fp": 4,
-        "fn": 0,
-        "errors": 0,
-        "scamTotal": 12,
-        "scamsCaught": 12,
-        "safeTotal": 7,
-        "falseAlarms": 4,
-        "avgMs": 27049,
-        "firstRunMs": 25919
-      },
-      "rulesAi": {
-        "total": 20,
-        "correct": 19,
-        "accuracy": 95,
-        "fp": 1,
-        "fn": 0,
-        "errors": 0,
-        "scamTotal": 12,
-        "scamsCaught": 12,
-        "safeTotal": 7,
-        "falseAlarms": 1,
-        "avgMs": 21541,
-        "firstRunMs": 15399
-      },
-      "cloud": {
-        "total": 20,
-        "correct": 17,
-        "accuracy": 85,
-        "fp": 0,
-        "fn": 0,
-        "errors": 3,
-        "scamTotal": 12,
-        "scamsCaught": 9,
-        "safeTotal": 7,
-        "falseAlarms": 0,
-        "avgMs": 1134,
-        "firstRunMs": 2709
+    "rulesAi": {
+      "total": 20,
+      "correct": 17,
+      "accuracy": 85,
+      "fp": 3,
+      "fn": 0,
+      "errors": 0,
+      "scamTotal": 12,
+      "scamsCaught": 12,
+      "safeTotal": 7,
+      "falseAlarms": 3,
+      "avgMs": 26539,
+      "firstRunMs": 37734
+    },
+    "cloud": {
+      "total": 20,
+      "correct": 20,
+      "accuracy": 100,
+      "fp": 0,
+      "fn": 0,
+      "errors": 0,
+      "scamTotal": 12,
+      "scamsCaught": 12,
+      "safeTotal": 7,
+      "falseAlarms": 0,
+      "avgMs": 3759,
+      "firstRunMs": 3495
+    }
+  },
+  "messages": [
+    {
+      "id": 1,
+      "label": "Fake debit alert with login link",
+      "type": "scam",
+      "preview": "Zenova Bank Alert: Your acct **** 7821 has been debited NGN 45,000.00 on 22-Nov-…",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
       }
     },
-    "messages": [
-      {
-        "id": 1,
-        "label": "Fake debit alert with login link",
-        "type": "scam",
-        "preview": "Zenova Bank Alert: Your acct **** 7821 has been debited NGN 45,000.00 on 22-Nov-…",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "scam",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 2,
-        "label": "BVN / account restriction threat",
-        "type": "scam",
-        "preview": "Dear Customer, your Kora Bank account has been temporarily restricted due to a BV…",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "scam",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 3,
-        "label": "Fake OTP request",
-        "type": "scam",
-        "preview": "URGENT: Your Halden Bank OTP is 847 293. Please share this code with our agent on…",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "scam",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 4,
-        "label": "Job offer with upfront fee",
-        "type": "scam",
-        "preview": "Congratulations! You have been shortlisted for a junior engineer role at NovaPetr…",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": null,
-            "correct": false,
-            "error": "AI: Failed to parse stream (AI/parse-failed)"
-          }
-        }
-      },
-      {
-        "id": 5,
-        "label": "Lottery / prize scam",
-        "type": "scam",
-        "preview": "CONGRATULATIONS!!! You have won N2,500,000 in the Palmline Mobile 10th Anniversar…",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": null,
-            "correct": false,
-            "error": "AI: Failed to parse stream (AI/parse-failed)"
-          }
-        }
-      },
-      {
-        "id": 6,
-        "label": "Agency impersonation / investment pitch",
-        "type": "scam",
-        "preview": "Good day, I am Mr. Emeka Obi from National Revenue Office Forex Division. Due to …",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": null,
-            "correct": false,
-            "error": "AI: Failed to parse stream (AI/parse-failed)"
-          }
-        }
-      },
-      {
-        "id": 7,
-        "label": "Wrong transfer refund request",
-        "type": "scam",
-        "preview": "Hello, I mistakenly transferred N180,000 to your account (Kora Bank acct ending 4…",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "scam",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 8,
-        "label": "Phishing link — fake bank login",
-        "type": "scam",
-        "preview": "Halden Bank Internet Banking: Your token device has expired. Login now to reactiv…",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "scam",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 9,
-        "label": "Investment doubling scheme",
-        "type": "scam",
-        "preview": "Make money from home! Our AI trading robot has helped 2,000+ Nigerians earn N500…",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "scam",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 10,
-        "label": "Genuine bank debit alert (no link)",
-        "type": "safe",
-        "preview": "Halden Bank: Debit of NGN 12,500.00 from Acct ****3309 on 22-Nov-26 12:34. Desc: …",
-        "expected": "safe",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "safe",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 11,
-        "label": "Friend asking to meet",
-        "type": "safe",
-        "preview": "Hey! Are you free this Saturday? A few of us are heading to that new suya spot i…",
-        "expected": "safe",
-        "results": {
-          "aiOnly": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "rulesAi": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "safe",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 12,
-        "label": "Delivery update — no payment",
-        "type": "safe",
-        "preview": "SwiftDrop Logistics: Your package (Tracking: SWD-20261122-00441) has arrived at …",
-        "expected": "safe",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "safe",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 13,
-        "label": "Legitimate OTP (do not share)",
-        "type": "safe",
-        "preview": "Your Zenova Bank verification code is 492817. Valid for 5 minutes. Do NOT share t…",
-        "expected": "safe",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "safe",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 14,
-        "label": "Work email — meeting reschedule",
-        "type": "safe",
-        "preview": "Hi team, the 3pm project review meeting has been moved to 4:30pm today due to th…",
-        "expected": "safe",
-        "results": {
-          "aiOnly": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "rulesAi": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "safe",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 15,
-        "label": "Prompt injection attempt",
-        "type": "scam",
-        "preview": "Unusual login detected on your account. Verify at http://zenova-secure-login.xyz…",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "scam",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 16,
-        "label": "Pidgin scam — OTP request",
-        "type": "scam",
-        "preview": "Oga abeg your account don block, send the code wey dem send you make I help you …",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "scam",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 17,
-        "label": "Pidgin safe — casual check-in",
-        "type": "safe",
-        "preview": "How far, you don reach house?",
-        "expected": "safe",
-        "results": {
-          "aiOnly": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "rulesAi": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "safe",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 18,
-        "label": "Ambiguous job inquiry",
-        "type": "ambiguous",
-        "preview": "Hi, I saw your CV online. Are you currently open to new opportunities? We have a…",
-        "expected": "safe/suspicious",
-        "results": {
-          "aiOnly": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "rulesAi": {
-            "verdict": "safe",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "safe",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 19,
-        "label": "Defensive OTP — do not share warning",
-        "type": "safe",
-        "preview": "Halden Bank: Your OTP is 718263. Valid for 10 minutes. Do NOT share this PIN with…",
-        "expected": "safe",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": false
-          },
-          "cloud": {
-            "verdict": "safe",
-            "correct": true
-          }
-        }
-      },
-      {
-        "id": 20,
-        "label": "Imperative credential ask — OTP phishing",
-        "type": "scam",
-        "preview": "Your transfer is pending. Please send your OTP to our agent on 0001-444-5678 to …",
-        "expected": "scam",
-        "results": {
-          "aiOnly": {
-            "verdict": "suspicious",
-            "correct": false
-          },
-          "rulesAi": {
-            "verdict": "scam",
-            "correct": true
-          },
-          "cloud": {
-            "verdict": "scam",
-            "correct": true
-          }
+    {
+      "id": 2,
+      "label": "BVN / account restriction threat",
+      "type": "scam",
+      "preview": "Dear Customer, your Kora Bank account has been temporarily restricted due to a B…",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
         }
       }
-    ]
-  }
+    },
+    {
+      "id": 3,
+      "label": "Fake OTP request",
+      "type": "scam",
+      "preview": "URGENT: Your Halden Bank OTP is 847 293. Please share this code with our agent o…",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 4,
+      "label": "Job offer with upfront fee",
+      "type": "scam",
+      "preview": "Congratulations! You have been shortlisted for a junior engineer role at NovaPet…",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 5,
+      "label": "Lottery / prize scam",
+      "type": "scam",
+      "preview": "CONGRATULATIONS!!! You have won N2,500,000 in the Palmline Mobile 10th Anniversa…",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 6,
+      "label": "Agency impersonation / investment pitch",
+      "type": "scam",
+      "preview": "Good day, I am Mr. Emeka Obi from National Revenue Office Forex Division. Due to…",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 7,
+      "label": "Wrong transfer refund request",
+      "type": "scam",
+      "preview": "Hello, I mistakenly transferred N180,000 to your account (Kora Bank acct ending …",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 8,
+      "label": "Phishing link — fake bank login",
+      "type": "scam",
+      "preview": "Halden Bank Internet Banking: Your token device has expired. Login now to reacti…",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 9,
+      "label": "Investment doubling scheme",
+      "type": "scam",
+      "preview": "Make money from home! Our AI trading robot has helped 2,000+ Nigerians earn N500…",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 10,
+      "label": "Genuine bank debit alert (no link)",
+      "type": "safe",
+      "preview": "Halden Bank: Debit of NGN 12,500.00 from Acct ****3309 on 22-Nov-26 12:34. Desc:…",
+      "expected": "safe",
+      "results": {
+        "aiOnly": {
+          "verdict": "true",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": false
+        },
+        "cloud": {
+          "verdict": "safe",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 11,
+      "label": "Friend asking to meet",
+      "type": "safe",
+      "preview": "Hey! Are you free this Saturday? A few of us are heading to that new suya spot i…",
+      "expected": "safe",
+      "results": {
+        "aiOnly": {
+          "verdict": "safe",
+          "correct": true
+        },
+        "rulesAi": {
+          "verdict": "safe",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "safe",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 12,
+      "label": "Delivery update — no payment",
+      "type": "safe",
+      "preview": "SwiftDrop Logistics: Your package (Tracking: SWD-20261122-00441) has arrived at …",
+      "expected": "safe",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "cloud": {
+          "verdict": "safe",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 13,
+      "label": "Legitimate OTP (do not share)",
+      "type": "safe",
+      "preview": "Your Zenova Bank verification code is 492817. Valid for 5 minutes. Do NOT share …",
+      "expected": "safe",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "safe",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "safe",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 14,
+      "label": "Work email — meeting reschedule",
+      "type": "safe",
+      "preview": "Hi team, the 3pm project review meeting has been moved to 4:30pm today due to th…",
+      "expected": "safe",
+      "results": {
+        "aiOnly": {
+          "verdict": "safe",
+          "correct": true
+        },
+        "rulesAi": {
+          "verdict": "safe",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "safe",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 15,
+      "label": "Prompt injection attempt",
+      "type": "scam",
+      "preview": "Unusual login detected on your account. Verify at http://zenova-secure-login.xyz…",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 16,
+      "label": "Pidgin scam — OTP request",
+      "type": "scam",
+      "preview": "Oga abeg your account don block, send the code wey dem send you make I help you …",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 17,
+      "label": "Pidgin safe — casual check-in",
+      "type": "safe",
+      "preview": "How far, you don reach house?",
+      "expected": "safe",
+      "results": {
+        "aiOnly": {
+          "verdict": "safe",
+          "correct": true
+        },
+        "rulesAi": {
+          "verdict": "safe",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "safe",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 18,
+      "label": "Ambiguous job inquiry",
+      "type": "ambiguous",
+      "preview": "Hi, I saw your CV online. Are you currently open to new opportunities? We have a…",
+      "expected": "safe/suspicious",
+      "results": {
+        "aiOnly": {
+          "verdict": "safe",
+          "correct": true
+        },
+        "rulesAi": {
+          "verdict": "safe",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "safe",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 19,
+      "label": "Defensive OTP — do not share warning",
+      "type": "safe",
+      "preview": "Halden Bank: Your OTP is 718263. Valid for 10 minutes. Do NOT share this PIN wit…",
+      "expected": "safe",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": false
+        },
+        "cloud": {
+          "verdict": "safe",
+          "correct": true
+        }
+      }
+    },
+    {
+      "id": 20,
+      "label": "Imperative credential ask — OTP phishing",
+      "type": "scam",
+      "preview": "Your transfer is pending. Please send your OTP to our agent on 0001-444-5678 to …",
+      "expected": "scam",
+      "results": {
+        "aiOnly": {
+          "verdict": "suspicious",
+          "correct": false
+        },
+        "rulesAi": {
+          "verdict": "scam",
+          "correct": true
+        },
+        "cloud": {
+          "verdict": "scam",
+          "correct": true
+        }
+      }
+    }
+  ]
+}

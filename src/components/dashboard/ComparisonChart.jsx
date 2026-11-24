@@ -10,6 +10,7 @@ const MODE_CFG = [
   { key: 'aiOnly',  label: 'AI only',       color: '#94a3b8', bold: false },
   { key: 'rulesAi', label: 'Rules + AI ★',  color: '#2563eb', bold: true  },
   { key: 'cloud',   label: 'Cloud',          color: '#059669', bold: false },
+  { key: 'hybrid',  label: 'Hybrid',         color: '#7c3aed', bold: false },
 ];
 
 const METRICS = [
@@ -41,7 +42,7 @@ export default function ComparisonChart({ modes }) {
         viewBox={`0 0 ${totalW} ${totalH}`}
         style={{ width: '100%', height: 'auto' }}
         role="img"
-        aria-label="Grouped horizontal bar chart: accuracy, scams caught, and false alarms for AI only, Rules and AI, and Cloud modes"
+        aria-label="Grouped horizontal bar chart: accuracy, scams caught, and false alarms for AI only, Rules and AI, Cloud, and Hybrid modes"
       >
         {METRICS.map((metric, gi) => {
           const gy = PAD_T + gi * (groupH + GG);
@@ -117,7 +118,7 @@ export default function ComparisonChart({ modes }) {
         })}
       </svg>
       <figcaption style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 4 }}>
-        ↓ = lower is better for False alarms.&nbsp;&nbsp;★ = Rules + AI, our primary design.
+        ↓ = lower is better for False alarms.&nbsp;&nbsp;★ = Rules + AI, our primary design.&nbsp;&nbsp;Hybrid = on-device + cloud second-opinion for non-safe results.
       </figcaption>
     </figure>
   );

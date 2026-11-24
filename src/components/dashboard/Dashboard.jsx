@@ -9,7 +9,7 @@
 import { useState, useEffect } from 'react';
 import snapshot from '../../data/evalSnapshot.json';
 import { getOnDeviceAvailability } from '../../ai/availability';
-import { onDeviceCheck, cloudCheck, warmUpDeviceModel } from '../../ai/checkMessage';
+import { onDeviceCheck, cloudCheck, hybridCheck, warmUpDeviceModel } from '../../ai/checkMessage';
 import { aiOnlyCheck } from '../../dev/aiOnlyCheck';
 import { TEST_MESSAGES } from '../../dev/testMessages';
 import ComparisonChart from './ComparisonChart';
@@ -45,7 +45,7 @@ function getMessageType(msg) {
 function buildLiveSnapshot(liveRows, includeCloud) {
   function computeLiveModeStats(rows) {
     if (!rows) return null;
-    let correct = 0, errors = 0, scamsCaught = 0, falseAlarms = 0;
+    let correct = 0, errors = 0, scamsCaught = 0, falseAlarms = 0, cloudCount = 0;
     let scamTotal = 0, safeTotal = 0;
     const durations = [];
 
@@ -67,6 +67,7 @@ function buildLiveSnapshot(liveRows, includeCloud) {
       if (match) correct++;
       if (isSafe && v !== 'safe') falseAlarms++;
       if (isScam && (v === 'scam' || v === 'suspicious')) scamsCaught++;
+      if (row.sentToCloud) cloudCount++;
       if (row.durationMs) durations.push(row.durationMs);
     });
 
@@ -77,6 +78,7 @@ function buildLiveSnapshot(liveRows, includeCloud) {
       scamsCaught, scamTotal,
       falseAlarms, safeTotal,
       errors,
+      cloudCount,
       firstRunMs: durations[0] ?? null,
       avgMs: durations.length > 1
         ? Math.round(durations.slice(1).reduce((a, b) => a + b, 0) / (durations.length - 1))
@@ -98,17 +100,20 @@ function buildLiveSnapshot(liveRows, includeCloud) {
     modes: {
       aiOnly:  computeLiveModeStats(liveRows.aiOnly),
       rulesAi: computeLiveModeStats(liveRows.rulesAi),
+      hybrid:  computeLiveModeStats(liveRows.hybrid),
       cloud:   includeCloud ? computeLiveModeStats(liveRows.cloud) : null,
     },
     messages: TEST_MESSAGES.map((msg, i) => {
-      function pick(rows) {
+      function pick(rows, storeCloud) {
         if (!rows) return null;
         const r = rows[i];
         if (!r) return null;
         if (r.error) return { verdict: null, correct: false, error: r.error };
         const match = Array.isArray(msg.expected)
           ? msg.expected.includes(r.verdict) : r.verdict === msg.expected;
-        return { verdict: r.verdict, correct: match };
+        const base = { verdict: r.verdict, correct: match };
+        if (storeCloud) base.sentToCloud = r.sentToCloud ?? false;
+        return base;
       }
       return {
         id: msg.id,
@@ -119,6 +124,7 @@ function buildLiveSnapshot(liveRows, includeCloud) {
         results: {
           aiOnly:  pick(liveRows.aiOnly),
           rulesAi: pick(liveRows.rulesAi),
+          hybrid:  pick(liveRows.hybrid, true),
           cloud:   includeCloud ? pick(liveRows.cloud) : null,
         },
       };
@@ -142,6 +148,7 @@ export default function Dashboard() {
 
   const data = liveData ?? (snapshot.placeholder ? null : snapshot);
   const ru   = data?.modes?.rulesAi;
+  const hy   = data?.modes?.hybrid;
 
   // ── Live run ──────────────────────────────────────────────────────────────
 
@@ -155,11 +162,12 @@ export default function Dashboard() {
     try { await warmUpDeviceModel(); } catch { /* non-fatal */ }
 
     setLiveRunState('running');
-    const liveRows = { aiOnly: [], rulesAi: [], cloud: [] };
+    const liveRows = { aiOnly: [], rulesAi: [], hybrid: [], cloud: [] };
 
     const tasks = [
       { key: 'aiOnly',  fn: (t) => aiOnlyCheck(t) },
       { key: 'rulesAi', fn: (t) => onDeviceCheck(t) },
+      { key: 'hybrid',  fn: (t) => hybridCheck(t) },
       ...(includeCloud ? [{ key: 'cloud', fn: (t) => cloudCheck(t) }] : []),
     ];
 
@@ -173,7 +181,11 @@ export default function Dashboard() {
           const start = Date.now();
           try {
             const result = await task.fn(TEST_MESSAGES[i].text);
-            liveRows[task.key].push({ verdict: result.verdict, durationMs: Date.now() - start });
+            liveRows[task.key].push({
+              verdict: result.verdict,
+              durationMs: Date.now() - start,
+              sentToCloud: result.sentToCloud ?? false,
+            });
           } catch (err) {
             liveRows[task.key].push({ error: (err?.message ?? String(err)).slice(0, 200) });
           }
@@ -197,9 +209,10 @@ export default function Dashboard() {
       <header style={S.header}>
         <h1 style={S.h1}>How accurate is ScamShield?</h1>
         <p style={S.lead}>
-          We tested the same 20 messages three ways: raw on-device AI (Gemini Nano
-          alone), our Rules&nbsp;+&nbsp;AI design (rule engine + Nano + consistency checks),
-          and the cloud model. Results below are from that test.
+          We tested the same 20 messages four ways: raw on-device AI (Gemini Nano alone),
+          our Rules&nbsp;+&nbsp;AI design (rule engine + Nano + consistency checks), the cloud
+          model, and a Hybrid mode that uses on-device first and only escalates non-safe
+          results to the cloud. Results below are from that test.
         </p>
       </header>
 
@@ -224,7 +237,7 @@ export default function Dashboard() {
         </div>
       ) : (
         <>
-          {/* ── Stat tiles ── */}
+          {/* ── Stat tiles — Rules + AI ── */}
           <section aria-label="Key metrics for Rules + AI mode">
             <SectionLabel>Rules + AI — key metrics</SectionLabel>
             <div style={S.tileGrid}>
@@ -247,13 +260,34 @@ export default function Dashboard() {
                 accent="#d97706"
               />
               <StatTile
-                label="Messages sent to cloud"
+                label="Cloud uploads"
                 value="0"
                 sub="On-device mode — private by design"
                 accent="#059669"
               />
             </div>
           </section>
+
+          {/* ── Stat tiles — Hybrid ── */}
+          {hy && (
+            <section aria-label="Key metrics for Hybrid mode">
+              <SectionLabel>Hybrid mode — key metrics</SectionLabel>
+              <div style={S.tileGrid}>
+                <StatTile
+                  label="Hybrid accuracy"
+                  value={`${hy.accuracy}%`}
+                  sub={`${hy.correct} correct out of ${hy.total}`}
+                  accent="#7c3aed"
+                />
+                <StatTile
+                  label="Kept fully private"
+                  value={`${hy.total - (hy.cloudCount ?? 0)}/${hy.total}`}
+                  sub={`${hy.cloudCount ?? 0} messages escalated to cloud`}
+                  accent="#059669"
+                />
+              </div>
+            </section>
+          )}
 
           {/* ── Comparison chart ── */}
           <Section title="Mode comparison" id="comparison">
@@ -295,12 +329,21 @@ export default function Dashboard() {
             and finds evidence (links, credential requests, urgency cues). The rule engine&apos;s
             findings are injected into the prompt so Nano focuses on reasoning, not
             pattern-matching. Post-processing enforces verdict consistency and drops
-            any AI-generated phrases not found in the original message.
+            any AI-generated phrases not found in the original message. Nothing is sent to the
+            cloud.
           </li>
           <li>
             <strong>Cloud</strong> — personal details are masked on-device first (regex masker),
             then the masked text is sent to Gemini&nbsp;3.5&nbsp;Flash-Lite. Only called with
             explicit user consent.
+          </li>
+          <li>
+            <strong>Hybrid</strong> — Rules + AI runs on-device first. If the verdict is
+            &ldquo;safe&rdquo;, the message stays fully private. If it is &ldquo;scam&rdquo;
+            or &ldquo;suspicious&rdquo;, the masked text is sent to the cloud for a second
+            opinion and the cloud verdict is used as final. A veto prevents the cloud from
+            overriding a strong on-device rule signal (credential request, AI injection,
+            or link&nbsp;+&nbsp;threat).
           </li>
         </ul>
       </Section>
@@ -349,9 +392,10 @@ function Section({ title, id, children, dimmed }) {
 
 function SpeedTable({ modes, warmupMs }) {
   const rows = [
-    { label: 'AI only',       key: 'aiOnly',  note: 'On-device'        },
-    { label: 'Rules + AI ★',  key: 'rulesAi', note: 'On-device'        },
-    { label: 'Cloud',         key: 'cloud',   note: 'Cloud (masked)'   },
+    { label: 'AI only',       key: 'aiOnly',  note: 'On-device'                   },
+    { label: 'Rules + AI ★',  key: 'rulesAi', note: 'On-device'                   },
+    { label: 'Cloud',         key: 'cloud',   note: 'Cloud (masked)'              },
+    { label: 'Hybrid',        key: 'hybrid',  note: 'On-device + cloud (some)'    },
   ];
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -450,6 +494,7 @@ const MODE_LABEL = {
   'warm-up': 'Warming up on-device model',
   aiOnly:    'AI only (on-device)',
   rulesAi:   'Rules + AI (on-device)',
+  hybrid:    'Hybrid (on-device + cloud)',
   cloud:     'Cloud',
 };
 
