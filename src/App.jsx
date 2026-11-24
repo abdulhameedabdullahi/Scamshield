@@ -12,6 +12,7 @@ import VerdictCard from './components/VerdictCard';
 import ConsentDialog from './components/ConsentDialog';
 import DevTestPanel from './components/DevTestPanel';
 import TestRunner from './dev/TestRunner';
+import Dashboard from './components/dashboard/Dashboard';
 
 // App-level state machine:
 //   idle           → waiting for user to type and click Check
@@ -23,6 +24,17 @@ import TestRunner from './dev/TestRunner';
 //   error          → an error occurred
 
 export default function App() {
+  const [page, setPage] = useState(
+    () => window.location.hash === '#/accuracy' ? 'dashboard' : 'check'
+  );
+
+  useEffect(() => {
+    const handleHash = () =>
+      setPage(window.location.hash === '#/accuracy' ? 'dashboard' : 'check');
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
   const [appState, setAppState] = useState('idle');
   const [text, setText] = useState('');
   const [result, setResult] = useState(null);
@@ -232,7 +244,32 @@ export default function App() {
     : 'Analysing via cloud…';
 
   return (
-    <div style={styles.container}>
+    <div style={page === 'dashboard' ? styles.containerWide : styles.container}>
+      {/* Navigation */}
+      <nav style={styles.nav}>
+        <span style={styles.navBrand}>{APP_NAME}</span>
+        <div style={styles.navLinks}>
+          <a
+            href="#"
+            style={page === 'check' ? styles.navLinkActive : styles.navLink}
+          >
+            Check a message
+          </a>
+          <a
+            href="#/accuracy"
+            style={page === 'dashboard' ? styles.navLinkActive : styles.navLink}
+          >
+            How accurate is it?
+          </a>
+        </div>
+      </nav>
+
+      {/* Dashboard page */}
+      {page === 'dashboard' && <Dashboard />}
+
+      {/* Check page */}
+      {page === 'check' && <>
+
       {/* Header */}
       <header style={styles.header}>
         <h1 style={styles.title}>{APP_NAME}</h1>
@@ -365,6 +402,8 @@ export default function App() {
           </div>
         )}
       </div>
+
+      </>}
     </div>
   );
 }
@@ -442,8 +481,48 @@ const prelStyles = {
 const styles = {
   container: {
     maxWidth: 680,
-    margin: '40px auto',
+    margin: '0 auto',
     padding: '0 20px 60px',
+  },
+  containerWide: {
+    margin: '0 auto',
+    padding: '0 0 60px',
+  },
+  nav: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 20,
+    padding: '14px 20px',
+    borderBottom: '1px solid #e5e7eb',
+    marginBottom: 32,
+    flexWrap: 'wrap',
+  },
+  navBrand: {
+    fontWeight: 700,
+    fontSize: '1rem',
+    color: '#111827',
+    marginRight: 'auto',
+  },
+  navLinks: {
+    display: 'flex',
+    gap: 4,
+  },
+  navLink: {
+    padding: '6px 14px',
+    fontSize: '0.875rem',
+    color: '#6b7280',
+    textDecoration: 'none',
+    borderRadius: 6,
+    fontWeight: 500,
+  },
+  navLinkActive: {
+    padding: '6px 14px',
+    fontSize: '0.875rem',
+    color: '#1d4ed8',
+    textDecoration: 'none',
+    borderRadius: 6,
+    fontWeight: 700,
+    background: '#eff6ff',
   },
   header: {
     marginBottom: 24,

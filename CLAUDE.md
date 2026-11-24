@@ -95,11 +95,19 @@ src/
     ConsentDialog.jsx   ← Inline consent UI for the cloud check path
     DevTestPanel.jsx    ← Dev test UI: availability status + on-device/cloud hello-world buttons
   dev/
-    testMessages.js     ← 18 synthetic test messages (IDs 1-18); expected may be array
-    TestRunner.jsx      ← Batch test runner: FP/FN tracking, Export button for eval markdown
-  App.jsx               ← Full app UI; second opinion flow; DevTestPanel + TestRunner behind toggle
+    testMessages.js     ← 20 synthetic test messages (IDs 1-20); expected may be array
+    TestRunner.jsx      ← Batch test runner: FP/FN tracking, Export markdown + Export JSON buttons
+    aiOnlyCheck.js      ← aiOnlyCheck(text) — on-device, no rules (v1 baseline for comparison)
+  data/
+    evalSnapshot.json   ← Placeholder { "placeholder": true }; paste exported JSON here for dashboard
+  App.jsx               ← Full app UI; second opinion flow; hash routing; nav bar; DevTestPanel + TestRunner behind toggle
   main.jsx              ← Vite entry point (unchanged from template)
   index.css             ← Global styles (cleaned up from Vite template)
+  components/
+    dashboard/
+      ComparisonChart.jsx ← Pure SVG grouped bar chart: 3 metrics × 3 modes
+      MessageTable.jsx    ← Per-message results table with All/Scams/Safe filter
+      Dashboard.jsx       ← Main dashboard page; hash route #/accuracy
 docs/
   eval-baseline.md      ← Template for v1 baseline results (populate by running TestRunner)
   eval-v2.md            ← Template for v2 results (populate after redesign)
@@ -334,3 +342,44 @@ const finalText = (await streamResult.response).text(); // complete JSON — par
 
 ### Notes on temperature/topK
 Checked `@firebase/ai` type definitions: `temperature` and `topK` exist in `LanguageModelCreateCoreOptions` but are marked `@deprecated`. They were NOT set — deprecated fields may behave inconsistently across Chrome versions.
+
+---
+
+## Decisions made in session 6 (Evaluation Dashboard + fixes)
+
+### Evaluation Dashboard (`src/components/dashboard/`)
+
+An in-app dashboard at the `#/accuracy` hash route so judges and users can explore accuracy data without leaving the app.
+
+- **No new libraries** — chart in pure SVG, layout in CSS.
+- **Data source**: `src/data/evalSnapshot.json` — `{ "placeholder": true }` until a real run is exported and pasted there. When placeholder, the dashboard shows a helpful message.
+- **Live run** button re-runs the full 20-message suite in-browser and displays results in-place, labelled "Live — your device, just now". Results are **not** saved to disk.
+
+#### New files
+- **`src/data/evalSnapshot.json`** — placeholder; user pastes exported JSON here
+- **`src/components/dashboard/ComparisonChart.jsx`** — pure SVG grouped horizontal bar chart; 3 metrics × 3 modes; Rules+AI highlighted blue
+- **`src/components/dashboard/MessageTable.jsx`** — per-message results table; filter All/Scams/Safe; `overflow-x: auto`; error tooltip
+- **`src/components/dashboard/Dashboard.jsx`** — main dashboard page; stat tiles; ComparisonChart; SpeedTable; MessageTable; "How we tested", "What modes mean", "Run on your device" sections
+
+#### Dashboard sections
+1. **4 Stat tiles** (Rules+AI mode): Accuracy%, Scams caught (x/y), False alarms (x/y), Cloud uploads: 0
+2. **Comparison chart** — SVG horizontal bars; Accuracy, Scams caught%, False alarms% × 3 modes
+3. **Speed table** — first run + avg per mode in ms; hardware note
+4. **Per-message table** — with type filters and ResultCell showing ✓/✗ + verdict
+5. **How we tested** — dataset composition, test date/device, limitations
+6. **What modes mean** — 3 bullets
+7. **Run on your device** — live run with on-device availability gate, optional cloud checkbox, progress indicator
+
+#### Navigation + routing
+- **`src/App.jsx`** (UPDATED) — hash-based routing: `window.location.hash === '#/accuracy'` → 'dashboard'; `hashchange` listener in useEffect; nav bar "Check a message" | "How accurate is it?"; `containerWide` style for dashboard page; imports and conditionally renders `Dashboard`
+
+#### Export JSON (TestRunner.jsx)
+- **`src/dev/TestRunner.jsx`** (UPDATED) — added `buildSnapshot()` and `handleExportJSON()` functions; "Export JSON" button alongside "Export markdown"
+- Snapshot format: `{ generatedAt, warmupMs, device: { chromeVersion, deviceMemory, hardwareConcurrency }, datasetSize, modes: { aiOnly, rulesAi, cloud each { accuracy, correct, total, scamsCaught, scamTotal, falseAlarms, safeTotal, errors, firstRunMs, avgMs } }, messages: [{ id, label, type, preview, expected, results: { aiOnly, rulesAi, cloud each { verdict, correct, error? } } }] }`
+- `computeStats.firstMs` is renamed to `firstRunMs` in the snapshot for consistency with Dashboard
+
+#### Snapshot key: `firstRunMs` (not `firstMs`)
+The `computeStats()` function in TestRunner.jsx returns `firstMs`, but the snapshot format and Dashboard components use `firstRunMs`. `buildSnapshot()` renames it via destructuring. `buildLiveSnapshot()` in Dashboard.jsx also uses `firstRunMs` directly.
+
+### Bug fixes in session 6
+- Removed unused `fp` / `fn` variables from `computeLiveModeStats` in `Dashboard.jsx` (ESLint no-unused-vars)

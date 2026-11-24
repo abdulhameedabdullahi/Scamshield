@@ -268,7 +268,79 @@ export default function TestRunner() {
     setRetryMsg('');
   }
 
-  // ── Export ───────────────────────────────────────────────────────────────────
+  // ── Export JSON ──────────────────────────────────────────────────────────────
+
+  function buildSnapshot() {
+    function chromeVersion() {
+      const brands = navigator.userAgentData?.brands;
+      if (brands) {
+        const chrome = brands.find(
+          (b) => b.brand === 'Google Chrome' || b.brand === 'Chromium'
+        );
+        if (chrome) return chrome.version;
+      }
+      return navigator.userAgent.match(/Chrome\/(\d+)/)?.[1] ?? 'unknown';
+    }
+    function getMessageType(msg) {
+      if (Array.isArray(msg.expected) && msg.expected.length > 1) return 'ambiguous';
+      const exp = Array.isArray(msg.expected) ? msg.expected[0] : msg.expected;
+      return exp === 'safe' ? 'safe' : 'scam';
+    }
+    function rowToResult(row) {
+      if (!row) return null;
+      if (row.error) return { verdict: null, correct: false, error: row.error.slice(0, 200) };
+      return { verdict: row.actual, correct: row.verdictMatch };
+    }
+    function transformStats(stats) {
+      if (!stats) return null;
+      const { firstMs, ...rest } = stats;
+      return { ...rest, firstRunMs: firstMs };
+    }
+    return {
+      generatedAt: new Date().toISOString(),
+      warmupMs: warmupMs ?? null,
+      device: {
+        chromeVersion: chromeVersion(),
+        onDeviceBackend: 'unknown',
+        deviceMemory: navigator.deviceMemory ?? null,
+        hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+      },
+      datasetSize: TEST_MESSAGES.length,
+      modes: {
+        aiOnly:  transformStats(computeStats(modeRows['ai-only'])),
+        rulesAi: transformStats(computeStats(modeRows['rules-ai'])),
+        cloud:   transformStats(computeStats(modeRows['cloud'])),
+      },
+      messages: TEST_MESSAGES.map((msg, i) => ({
+        id: msg.id,
+        label: msg.label,
+        type: getMessageType(msg),
+        preview: msg.text.slice(0, 80) + (msg.text.length > 80 ? '…' : ''),
+        expected: Array.isArray(msg.expected) ? msg.expected.join('/') : msg.expected,
+        results: {
+          aiOnly:  rowToResult(modeRows['ai-only']?.[i]),
+          rulesAi: rowToResult(modeRows['rules-ai']?.[i]),
+          cloud:   rowToResult(modeRows['cloud']?.[i]),
+        },
+      })),
+    };
+  }
+
+  function handleExportJSON() {
+    const snap = buildSnapshot();
+    const json = JSON.stringify(snap, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `scamshield-eval-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Export markdown ───────────────────────────────────────────────────────────
 
   function handleExport() {
     const lines = ['## ScamShield — Test Suite Results', ''];
@@ -462,9 +534,12 @@ export default function TestRunner() {
 
       {/* Export */}
       {!isRunning && Object.keys(modeRows).length > 0 && (
-        <div style={styles.exportRow}>
+        <div style={{ ...styles.exportRow, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button style={{ ...styles.btn, ...styles.btnSecondary }} onClick={handleExport} type="button">
             Export markdown
+          </button>
+          <button style={{ ...styles.btn, ...styles.btnSecondary }} onClick={handleExportJSON} type="button">
+            Export JSON
           </button>
         </div>
       )}
