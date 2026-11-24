@@ -41,6 +41,46 @@ export const PLACEHOLDER_TYPES = {
 
 export const APP_NAME = 'ScamShield';
 
+// ── Agent configuration ────────────────────────────────────────────────────
+
+// TLDs frequently used in scam/phishing domains.
+export const RISKY_TLDS = [
+  '.tk', '.ml', '.ga', '.cf', '.gq', '.top', '.xyz', '.click',
+  '.link', '.online', '.site', '.website', '.store', '.info', '.pw',
+];
+
+// Fictional brand names used in ScamShield (matches test messages).
+// Used by analyze_link to detect brand-impersonation domains.
+export const FICTIONAL_BRANDS = [
+  'zenova', 'kora', 'halden', 'palmline', 'swiftdrop', 'novapetro',
+];
+
+// Words that combined with a brand name indicate impersonation.
+export const BRAND_RISK_WORDS = [
+  'verify', 'secure', 'login', 'update', 'bvn', 'reward',
+  'account', 'confirm', 'validate', 'activate', 'alert', 'suspend',
+];
+
+// Known URL-shortener hostnames.
+export const KNOWN_SHORTENERS = [
+  'bit.ly', 'tinyurl.com', 'ow.ly', 't.co', 'goo.gl', 'short.io',
+  'rebrand.ly', 'is.gd', 'tiny.cc', 'cutt.ly', 'shorturl.at',
+];
+
+// Default scam trends shown when Remote Config is unavailable.
+export const SCAM_TRENDS_DEFAULT =
+  'Current scam trends in Nigeria: BVN/NIN verification scams are rising. ' +
+  'Fake bank debit alerts with phishing links. Investment-doubling schemes. ' +
+  'Fake job offers requiring upfront registration fees. ' +
+  'Impersonation of government agencies (EFCC, CBN, NCC).';
+
+// Set true to return deterministic demo data from check_community_reports
+// instead of querying Firestore. Switch to false once Firestore rules are deployed.
+export const USE_MOCK_REPORTS = true;
+
+// Maximum tool-call steps in one agent run before forcing the final answer.
+export const AGENT_MAX_STEPS = 6;
+
 // IMPORTANT: Verify this model name in the Firebase AI Logic docs before shipping.
 // Supported models: https://firebase.google.com/docs/ai-logic/models
 // Confirmed working model name as of Nov 2026 (gemini-2.0-flash-lite was retired).

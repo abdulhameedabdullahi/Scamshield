@@ -66,7 +66,7 @@ function getCategoryLabel(verdict, category) {
   return CATEGORY_LABELS[category] ?? category;
 }
 
-export default function VerdictCard({ result, originalText, onSecondOpinion, onInvestigate }) {
+export default function VerdictCard({ result, originalText, onInvestigate }) {
   const cfg = VERDICT_CONFIG[result.verdict] ?? VERDICT_CONFIG.suspicious;
   const categoryLabel = getCategoryLabel(result.verdict, result.category);
   const confidenceLabel = CONFIDENCE_LABELS[result.confidence] ?? result.confidence;
@@ -154,21 +154,7 @@ export default function VerdictCard({ result, originalText, onSecondOpinion, onI
           </div>
         )}
 
-        {/* Second opinion button — shown when needsSecondOpinion and callback provided */}
-        {result.needsSecondOpinion && onSecondOpinion && (
-          <div style={styles.secondOpinionRow}>
-            <button
-              style={styles.secondOpinionBtn}
-              onClick={onSecondOpinion}
-              type="button"
-            >
-              Not sure? Get a second opinion from the cloud
-              <span style={styles.secondOpinionNote}> (personal details masked)</span>
-            </button>
-          </div>
-        )}
-
-        {/* Investigate deeper button — shown for all verdicts when callback provided */}
+        {/* Agent investigation button — merged cloud action for all verdicts */}
         {onInvestigate && (
           <div style={styles.investigateRow}>
             <button
@@ -176,8 +162,8 @@ export default function VerdictCard({ result, originalText, onSecondOpinion, onI
               onClick={onInvestigate}
               type="button"
             >
-              {isSafe ? 'Still unsure? Investigate deeper' : 'Investigate deeper'}
-              <span style={styles.investigateNote}> — searches links & numbers online</span>
+              Investigate with ScamShield Agent
+              <span style={styles.investigateNote}> (cloud · personal details masked)</span>
             </button>
           </div>
         )}
@@ -326,12 +312,12 @@ const styles = {
     padding: '7px 14px',
     fontSize: '0.82rem',
     fontWeight: 600,
-    background: '#eff6ff',
-    border: '1px solid #93c5fd',
+    background: '#eef2ff',
+    border: '1px solid #a5b4fc',
     borderRadius: 6,
     cursor: 'pointer',
     fontFamily: 'inherit',
-    color: '#1e40af',
+    color: '#3730a3',
   },
   investigateNote: {
     fontWeight: 400,

@@ -5,6 +5,7 @@
 import { initializeApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { getAI, GoogleAIBackend } from 'firebase/ai';
+import { getRemoteConfig } from 'firebase/remote-config';
 
 // ---------------------------------------------------------------------------
 // Firebase project config (public — safe to commit)
@@ -66,3 +67,12 @@ initializeAppCheck(app, {
 // the on-device and cloud model instances.
 // ---------------------------------------------------------------------------
 export const ai = getAI(app, { backend: new GoogleAIBackend() });
+
+// ---------------------------------------------------------------------------
+// Remote Config — server-side configuration (e.g. scam_trends string).
+// minimumFetchIntervalMillis: 60 s in dev (see changes quickly); 1 h in prod.
+// Actual fetch + activate happens in src/agent/tools/getScamTrends.js.
+// ---------------------------------------------------------------------------
+export const remoteConfig = getRemoteConfig(app);
+remoteConfig.settings.minimumFetchIntervalMillis =
+  import.meta.env.DEV ? 60_000 : 3_600_000;

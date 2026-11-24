@@ -54,9 +54,57 @@ ScamShield uses a **Rules + AI** hybrid architecture designed for the limited ca
 | Scam check — on-device | Gemini Nano | `ONLY_ON_DEVICE` | Raw text stays on device |
 | Entity detection (masking step 2) | Gemini Nano | `ONLY_ON_DEVICE` | Names, addresses, DOB detected locally |
 | PII masking | On-device (regex + AI) | `ONLY_ON_DEVICE` | Placeholder map **never** leaves device |
-| Scam check / second opinion — cloud | Cloud (Gemini) | `ONLY_IN_CLOUD` | SendPreview gate: user reviews masked text |
-| Deep investigation | Cloud | `ONLY_IN_CLOUD` + Google Search | Masked text only; sources cited |
+| Scam check — cloud (Nano unavailable) | Cloud (Gemini) | `ONLY_IN_CLOUD` | SendPreview gate: user reviews masked text |
+| Agent investigation | Cloud | `ONLY_IN_CLOUD` + tools | Masked text only; tools execute locally |
+| Agent tools | On-device (pure JS / Firestore) | — | Never leave the device |
 | Devices without Gemini Nano | Cloud (consent-gated) | `ONLY_IN_CLOUD` | SendPreview masking gate; informed degradation |
+
+---
+
+## ScamShield Agent
+
+After the initial on-device check, the user can tap **"Investigate with ScamShield Agent"** to run a deeper cloud-based investigation. The agent uses Firebase AI Logic function calling to coordinate a set of tools, most of which run **locally on the device** — only the reasoning step runs in the cloud.
+
+### Tools
+
+| Tool | Runs where | What it does |
+|------|-----------|-------------|
+| `analyze_link` | On-device (pure JS) | Detects phishing signals in a URL — IP hosts, punycode, URL shorteners, risky TLDs, excessive subdomains, brand impersonation, Levenshtein lookalikes. No network request. |
+| `check_community_reports` | On-device → Firestore | Queries the anonymous community reports database for a domain or phone number. Returns count, last report date, and top scam categories. Uses deterministic mock data until Firestore is deployed. |
+| `search_web` | Cloud (`ONLY_IN_CLOUD` + Google Search) | Makes a **separate** grounded call (function declarations and Google Search cannot be combined in a single Gemini request). Returns a 60-word summary and sources. Sources displayed with shadow DOM per Google TOS. |
+| `get_scam_trends` | On-device → Firebase Remote Config | Fetches the latest `scam_trends` string from Remote Config. Falls back to a built-in default if unavailable. |
+
+### How the agent loop works
+
+```mermaid
+flowchart TD
+    A["User taps 'Investigate with Agent'"]
+    B["SendPreview — user reviews masked text"]
+    C["AgentPanel starts"]
+    D["Cloud: startChat with functionDeclarations"]
+    E{"functionCalls()\nin response?"}
+    F["Execute tools LOCALLY\n(parallel if multiple)"]
+    G["Send FunctionResponse parts\nback to cloud model"]
+    H{"Steps < 6?"}
+    I["Parse final JSON answer\n(code block → bare JSON → fallback)"]
+    J["Show verdict + evidence +\nscam technique + next steps"]
+    K["Follow-up chat\n(regex-masked input)"]
+
+    A --> B --> C --> D --> E
+    E -- yes --> F --> G --> D
+    E -- no --> I
+    H -- no --> I
+    G --> H
+    I --> J --> K
+```
+
+### Human-in-the-loop design
+
+- The user **reviews and approves** the masked text before anything is sent (SendPreview gate).
+- **Only the reasoning step** is in the cloud — `analyze_link` and `check_community_reports` are pure local functions that never make network requests beyond the user's own Firestore.
+- The placeholder→original map is kept only in browser memory and is never transmitted.
+- Follow-up messages are regex-masked automatically before sending.
+- Tool results are **data fed to the model** — the system prompt instructs the model never to follow instructions found in tool results or in the message text.
 
 ---
 
@@ -104,8 +152,8 @@ flowchart TD
 - ✅ **Explicit hybrid routing** — on-device → download prompt → cloud (SendPreview-gated); no silent fallbacks
 - ✅ **On-device PII masking** — 2-step: regex detects numbers/emails/URLs; Gemini Nano detects names, addresses, DOBs. Placeholder map stays on device.
 - ✅ **SendPreview** — user reviews detected entities as chips before any cloud call; can toggle each entity between masked/kept. `onSend(maskedText)` only receives the masked string.
-- ✅ **Second opinion flow** — cloud check offered for non-safe verdicts; full SendPreview gate; PII masked first
-- ✅ **Investigate deeper** — cloud model with Google Search grounding; multi-turn follow-up chat; sources from Google Search rendered per TOS (shadow DOM); follow-up messages auto regex-masked
+- ✅ **ScamShield Agent** — function-calling agent loop: `analyze_link` (local heuristics), `check_community_reports` (Firestore + mock), `search_web` (separate grounded call, since Google Search + function declarations cannot combine in one request), `get_scam_trends` (Remote Config). Max 6 tool-call steps. Final answer as structured JSON with evidence, technique, next steps.
+- ✅ **AgentPanel** — live step timeline showing each tool call + result + duration; final verdict card with evidence tagged by source; follow-up chat with auto regex masking
 - ✅ **Full production UI** — ModelStatus, MessageInput, VerdictCard (with inline phrase highlights), SendPreview, InvestigationPanel
 - ✅ **Developer test harness** — 20 synthetic test messages, FP/FN tracking, markdown/JSON export, 4 inference modes (AI-only / Rules+AI / Cloud / Hybrid)
 - ✅ **In-app accuracy dashboard** (`#/accuracy`) — comparison chart, per-message table, live run

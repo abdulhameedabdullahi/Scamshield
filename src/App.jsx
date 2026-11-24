@@ -11,9 +11,10 @@ import ModelStatus from './components/ModelStatus';
 import MessageInput from './components/MessageInput';
 import VerdictCard from './components/VerdictCard';
 import SendPreview from './components/SendPreview';
-import InvestigationPanel from './components/InvestigationPanel';
+import AgentPanel from './components/AgentPanel';
 import DevTestPanel from './components/DevTestPanel';
 import TestRunner from './dev/TestRunner';
+import { runAgentTests, runAgentDemo } from './dev/agentTest';
 import Dashboard from './components/dashboard/Dashboard';
 
 // App-level state machine:
@@ -26,10 +27,7 @@ import Dashboard from './components/dashboard/Dashboard';
 //   done           → result is ready
 //   error          → an error occurred
 //
-// Second opinion state machine:
-//   idle | masking | send_preview | checking | done | error
-//
-// Investigation state machine:
+// Agent (investigation) state machine:
 //   idle | masking | send_preview | running
 
 export default function App() {
@@ -60,19 +58,11 @@ export default function App() {
   // ── Cloud send-preview state (first check path) ────────────────────────────
   const [maskData, setMaskData] = useState(null); // { entities, regexOnly }
 
-  // ── Second opinion state ───────────────────────────────────────────────────
-  // 'idle' | 'masking' | 'send_preview' | 'checking' | 'done' | 'error'
-  const [secondOpinionState, setSecondOpinionState] = useState('idle');
-  const [secondMaskData, setSecondMaskData] = useState(null);
-  const [secondResult, setSecondResult] = useState(null);
-  const [secondErrorMsg, setSecondErrorMsg] = useState('');
-
-  // ── Investigation state ────────────────────────────────────────────────────
+  // ── Agent (investigation) state ────────────────────────────────────────────
   // 'idle' | 'masking' | 'send_preview' | 'running'
   const [investigateState, setInvestigateState] = useState('idle');
   const [investigateMaskData, setInvestigateMaskData] = useState(null);
   const [investigateMaskedText, setInvestigateMaskedText] = useState(null);
-  // which result to investigate (main result or second opinion)
   const [investigateVerdict, setInvestigateVerdict] = useState(null);
 
   // ── Instant rules preview ──────────────────────────────────────────────────
@@ -119,10 +109,6 @@ export default function App() {
       setErrorMsg('');
       setMaskData(null);
     }
-    setSecondOpinionState('idle');
-    setSecondResult(null);
-    setSecondErrorMsg('');
-    setSecondMaskData(null);
     setInvestigateState('idle');
     setInvestigateMaskData(null);
     setInvestigateMaskedText(null);
@@ -136,10 +122,6 @@ export default function App() {
     setResult(null);
     setErrorMsg('');
     setMaskData(null);
-    setSecondOpinionState('idle');
-    setSecondResult(null);
-    setSecondErrorMsg('');
-    setSecondMaskData(null);
     setInvestigateState('idle');
     setInvestigateMaskData(null);
     setInvestigateMaskedText(null);
@@ -156,9 +138,6 @@ export default function App() {
     setResult(null);
     setErrorMsg('');
     setMaskData(null);
-    setSecondOpinionState('idle');
-    setSecondResult(null);
-    setSecondErrorMsg('');
     setInvestigateState('idle');
     setInvestigateMaskData(null);
     setInvestigateMaskedText(null);
@@ -257,42 +236,7 @@ export default function App() {
     setMaskData(null);
   }
 
-  // ── Second opinion flow ────────────────────────────────────────────────────
-
-  async function handleSecondOpinionRequest() {
-    setSecondOpinionState('masking');
-    setSecondResult(null);
-    setSecondErrorMsg('');
-    setSecondMaskData(null);
-    try {
-      const md = await detectEntities(text);
-      setSecondMaskData(md);
-      setSecondOpinionState('send_preview');
-    } catch (err) {
-      setSecondErrorMsg(err?.message ?? 'Failed to prepare masked text. Please try again.');
-      setSecondOpinionState('error');
-    }
-  }
-
-  async function handleSecondOpinionSendConfirm(maskedText) {
-    setSecondOpinionState('checking');
-    setSecondMaskData(null);
-    try {
-      const outcome = await cloudCheck(text, (chars) => setCharsReceived(chars), maskedText);
-      setSecondResult(outcome);
-      setSecondOpinionState('done');
-    } catch (err) {
-      setSecondErrorMsg(err?.message ?? 'Cloud check failed. Please try again.');
-      setSecondOpinionState('error');
-    }
-  }
-
-  function handleSecondOpinionSendCancel() {
-    setSecondOpinionState('idle');
-    setSecondMaskData(null);
-  }
-
-  // ── Investigation flow ─────────────────────────────────────────────────────
+  // ── Agent investigation flow ───────────────────────────────────────────────
 
   async function handleInvestigateRequest(verdictResult) {
     setInvestigateState('masking');
@@ -330,7 +274,6 @@ export default function App() {
 
   const isChecking = appState === 'checking';
   const isDownloading = appState === 'downloading';
-  const isSecondChecking = secondOpinionState === 'checking';
 
   const checkingLabel = availability === 'available'
     ? 'Analysing privately on your device…'
@@ -394,12 +337,10 @@ export default function App() {
       )}
 
       {/* Live progress indicator while checking */}
-      {(isChecking || isSecondChecking) && (
+      {isChecking && (
         <div style={styles.progressBox}>
           <span style={styles.progressDot} />
-          <span style={styles.progressText}>
-            {isSecondChecking ? 'Getting second opinion via cloud…' : checkingLabel}
-          </span>
+          <span style={styles.progressText}>{checkingLabel}</span>
           <span style={styles.progressStats}>
             {charsReceived > 0 && `${charsReceived} chars · `}
             {(elapsedMs / 1000).toFixed(1)}s
@@ -408,7 +349,7 @@ export default function App() {
       )}
 
       {/* Masking progress (before showing SendPreview) */}
-      {(appState === 'masking' || secondOpinionState === 'masking' || investigateState === 'masking') && (
+      {(appState === 'masking' || investigateState === 'masking') && (
         <div style={styles.maskingBox}>
           <span style={styles.progressDot} />
           <span style={styles.progressText}>Detecting personal details on your device…</span>
@@ -464,45 +405,12 @@ export default function App() {
           <VerdictCard
             result={result}
             originalText={text}
-            onSecondOpinion={secondOpinionState === 'idle' ? handleSecondOpinionRequest : undefined}
             onInvestigate={investigateState === 'idle' ? () => handleInvestigateRequest(result) : undefined}
           />
         </div>
       )}
 
-      {/* Second opinion — send preview */}
-      {secondOpinionState === 'send_preview' && secondMaskData && (
-        <div style={styles.sendPreviewWrap}>
-          <SendPreview
-            originalText={text}
-            entities={secondMaskData.entities}
-            regexOnly={secondMaskData.regexOnly}
-            onSend={handleSecondOpinionSendConfirm}
-            onCancel={handleSecondOpinionSendCancel}
-          />
-        </div>
-      )}
-
-      {/* Second opinion error */}
-      {secondOpinionState === 'error' && secondErrorMsg && (
-        <div style={{ ...styles.errorBox, marginTop: 12 }}>
-          <strong>Second opinion error: </strong>{secondErrorMsg}
-        </div>
-      )}
-
-      {/* Second opinion result */}
-      {secondOpinionState === 'done' && secondResult && (
-        <div style={styles.secondResultWrap}>
-          <div style={styles.secondResultHeader}>Second opinion from cloud</div>
-          <VerdictCard
-            result={secondResult}
-            originalText={text}
-            onInvestigate={investigateState === 'idle' ? () => handleInvestigateRequest(secondResult) : undefined}
-          />
-        </div>
-      )}
-
-      {/* Investigation — send preview */}
+      {/* Agent — send preview */}
       {investigateState === 'send_preview' && investigateMaskData && (
         <div style={styles.sendPreviewWrap}>
           <SendPreview
@@ -515,12 +423,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Investigation panel */}
+      {/* Agent panel */}
       {investigateState === 'running' && investigateMaskedText && (
         <div style={styles.investigateWrap}>
-          <InvestigationPanel
+          <AgentPanel
             maskedText={investigateMaskedText}
             deviceVerdict={investigateVerdict}
+            signals={preliminarySignals}
             onClose={handleInvestigateClose}
           />
         </div>
@@ -539,6 +448,22 @@ export default function App() {
         {devOpen && (
           <div style={styles.devContent}>
             <DevTestPanel />
+            <div style={styles.devAgentRow}>
+              <button
+                style={styles.devBtn}
+                type="button"
+                onClick={() => { runAgentTests(); }}
+              >
+                Run analyzeLink tests
+              </button>
+              <button
+                style={styles.devBtn}
+                type="button"
+                onClick={() => { runAgentDemo(); }}
+              >
+                Run agent demo (msg #1)
+              </button>
+            </div>
             <TestRunner />
           </div>
         )}
@@ -782,17 +707,6 @@ const styles = {
   resultWrap: {
     marginTop: 20,
   },
-  secondResultWrap: {
-    marginTop: 20,
-  },
-  secondResultHeader: {
-    fontSize: '0.82rem',
-    fontWeight: 700,
-    color: '#6b7280',
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-    marginBottom: 8,
-  },
   investigateWrap: {
     marginTop: 20,
   },
@@ -800,6 +714,22 @@ const styles = {
     marginTop: 48,
     borderTop: '1px solid #e5e7eb',
     paddingTop: 20,
+  },
+  devAgentRow: {
+    display: 'flex',
+    gap: 8,
+    marginBottom: 16,
+    flexWrap: 'wrap',
+  },
+  devBtn: {
+    padding: '6px 12px',
+    fontSize: '0.8rem',
+    background: '#f3f4f6',
+    border: '1px solid #d1d5db',
+    borderRadius: 6,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    color: '#374151',
   },
   devToggle: {
     background: 'none',
