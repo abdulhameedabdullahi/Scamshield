@@ -263,13 +263,13 @@ export default function App() {
         </a>
 
         {hasConversation && page === 'check' && (
-          <button style={S.newCheckBtn} onClick={handleClear} type="button">
+          <button className="topbar-new-check" onClick={handleClear} type="button">
             New check
           </button>
         )}
 
         <button
-          style={S.menuBtn}
+          className="topbar-icon-btn"
           onClick={() => setMenuOpen(true)}
           type="button"
           aria-label="Open menu"
@@ -377,7 +377,7 @@ export default function App() {
                     {EXAMPLES.map((ex) => (
                       <button
                         key={ex.label}
-                        style={S.exampleChip}
+                        className="chip-example"
                         type="button"
                         role="listitem"
                         onClick={() => handleTextChange(ex.text)}
@@ -391,7 +391,7 @@ export default function App() {
 
               {/* ── User message bubble ── */}
               {text && appState !== 'idle' && (
-                <div style={S.userRow} aria-label="Your message">
+                <div style={S.userRow} className="user-bubble-enter" aria-label="Your message">
                   <div style={S.userBubble}>{text}</div>
                 </div>
               )}
@@ -434,7 +434,7 @@ export default function App() {
 
               {/* ── Error ── */}
               {appState === 'error' && errorMsg && (
-                <div style={S.errorBubble} role="alert" aria-live="assertive">
+                <div style={S.errorBubble} className="bubble-enter" role="alert" aria-live="assertive">
                   <strong>Couldn't check the message.</strong> {errorMsg}
                 </div>
               )}
@@ -528,7 +528,7 @@ export default function App() {
 
 function WelcomeBubble() {
   return (
-    <div style={S.welcomeBubble} role="status">
+    <div style={S.welcomeBubble} className="bubble-enter" role="status">
       <p style={S.welcomeText}>
         Hi! Paste any message you're unsure about — a WhatsApp message, SMS or email.
         I'll check it on your phone first. Nothing is uploaded unless you say so.
@@ -543,7 +543,7 @@ function WelcomeBubble() {
 function PrelimBubble({ signals }) {
   const count = signals.length;
   return (
-    <div style={S.prelimBubble} role="status" aria-live="polite">
+    <div style={S.prelimBubble} className="bubble-enter" role="status" aria-live="polite">
       <div style={S.prelimHeading}>
         {count > 0
           ? `I can already see ${count} warning sign${count > 1 ? 's' : ''}:`
@@ -566,7 +566,7 @@ function PrelimBubble({ signals }) {
 
 function TypingBubble({ label }) {
   return (
-    <div style={S.typingBubble} aria-live="polite" aria-label={label}>
+    <div style={S.typingBubble} className="bubble-enter" aria-live="polite" aria-label={label}>
       <div className="typing-dots">
         <div className="typing-dot" />
         <div className="typing-dot" />
@@ -579,7 +579,7 @@ function TypingBubble({ label }) {
 
 function DownloadCard({ isDownloading, downloadProgress, onDownload }) {
   return (
-    <div style={S.downloadCard} role="region" aria-label="Download private checker">
+    <div style={S.downloadCard} className="bubble-enter" role="region" aria-label="Download private checker">
       <p style={S.downloadText}>
         To check this message privately on your phone, you need to download the private checker
         once. It stays on your phone and works offline after that.
@@ -592,7 +592,7 @@ function DownloadCard({ isDownloading, downloadProgress, onDownload }) {
           <span style={S.dlPct}>{downloadProgress}%</span>
         </div>
       ) : (
-        <button style={S.dlBtn} onClick={onDownload} type="button">
+        <button className="btn-deeper" onClick={onDownload} type="button">
           Download and check
         </button>
       )}
@@ -604,7 +604,7 @@ function MenuLink({ label, href, active, onClick }) {
   return (
     <a
       href={href}
-      style={{ ...S.menuLink, ...(active ? S.menuLinkActive : {}) }}
+      className={`menu-nav-link${active ? ' active' : ''}`}
       onClick={(e) => { e.preventDefault(); onClick?.(); }}
       aria-current={active ? 'page' : undefined}
     >
@@ -631,32 +631,6 @@ const S = {
     color: '#EFE8F4',
     letterSpacing: '-0.01em',
   },
-  newCheckBtn: {
-    padding: '6px 14px',
-    fontSize: '0.875rem',
-    fontWeight: 600,
-    background: 'rgba(239,232,244,0.15)',
-    color: '#EFE8F4',
-    border: '1px solid rgba(239,232,244,0.3)',
-    borderRadius: 'var(--r-btn)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    flexShrink: 0,
-    minHeight: 36,
-  },
-  menuBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 40,
-    height: 40,
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    padding: 0,
-    flexShrink: 0,
-  },
-
   /* Menu */
   menuHeader: {
     display: 'flex',
@@ -686,21 +660,6 @@ const S = {
     flexDirection: 'column',
     padding: '12px 0',
   },
-  menuLink: {
-    display: 'block',
-    padding: '14px 20px',
-    fontSize: '1rem',
-    color: 'var(--ink)',
-    textDecoration: 'none',
-    borderLeft: '3px solid transparent',
-    lineHeight: 1.4,
-  },
-  menuLinkActive: {
-    color: 'var(--plum-700)',
-    fontWeight: 700,
-    borderLeftColor: 'var(--plum-700)',
-    background: 'var(--plum-100)',
-  },
   menuDivider: {
     height: 1,
     background: 'var(--line)',
@@ -727,17 +686,6 @@ const S = {
     flexWrap: 'wrap',
     gap: 8,
     paddingLeft: 4,
-  },
-  exampleChip: {
-    padding: '8px 14px',
-    fontSize: '0.875rem',
-    background: '#fff',
-    color: 'var(--plum-700)',
-    border: '1px solid var(--plum-100)',
-    borderRadius: 'var(--r-chip)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    minHeight: 40,
   },
 
   /* User bubble */
@@ -832,18 +780,6 @@ const S = {
     fontWeight: 600,
     minWidth: 36,
     textAlign: 'right',
-  },
-  dlBtn: {
-    padding: '10px 20px',
-    fontSize: '0.9375rem',
-    fontWeight: 700,
-    background: 'var(--plum-700)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 'var(--r-btn)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    minHeight: 48,
   },
 
   /* Error bubble */

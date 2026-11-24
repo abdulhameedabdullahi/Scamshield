@@ -30,7 +30,7 @@ export default function MessageInput({ value, onChange, onCheck, onClear, disabl
 
   return (
     <div style={S.wrap}>
-      <div style={{ ...S.box, ...(overLimit ? S.boxOver : {}) }}>
+      <div className={`composer-box${overLimit ? ' over-limit' : ''}`}>
         <textarea
           ref={textareaRef}
           id="message-input"
@@ -56,7 +56,7 @@ export default function MessageInput({ value, onChange, onCheck, onClear, disabl
           <div style={S.actions}>
             {!value && (
               <button
-                style={S.pasteBtn}
+                className="btn-outline-plum"
                 onClick={handlePaste}
                 type="button"
                 title="Paste from clipboard"
@@ -68,7 +68,7 @@ export default function MessageInput({ value, onChange, onCheck, onClear, disabl
             )}
             {value && !disabled && (
               <button
-                style={S.clearBtn}
+                className="btn-ghost"
                 onClick={onClear}
                 type="button"
                 aria-label="Clear message"
@@ -77,7 +77,7 @@ export default function MessageInput({ value, onChange, onCheck, onClear, disabl
               </button>
             )}
             <button
-              style={{ ...S.checkBtn, ...(!canCheck ? S.checkBtnDisabled : {}) }}
+              className="btn-check"
               onClick={onCheck}
               disabled={!canCheck}
               type="button"
@@ -109,16 +109,6 @@ const S = {
     display: 'flex',
     flexDirection: 'column',
     gap: 4,
-  },
-  box: {
-    background: '#fff',
-    border: '1.5px solid var(--line)',
-    borderRadius: 'var(--r-input)',
-    overflow: 'hidden',
-    transition: 'border-color 0.15s',
-  },
-  boxOver: {
-    borderColor: 'var(--scam)',
   },
   textarea: {
     display: 'block',
@@ -154,50 +144,6 @@ const S = {
     display: 'flex',
     gap: 8,
     alignItems: 'center',
-  },
-  pasteBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 5,
-    padding: '8px 14px',
-    fontSize: '0.875rem',
-    background: 'var(--plum-100)',
-    color: 'var(--plum-700)',
-    border: '1px solid var(--line)',
-    borderRadius: 'var(--r-btn)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    minHeight: 44,
-  },
-  clearBtn: {
-    padding: '8px 14px',
-    fontSize: '0.875rem',
-    background: 'transparent',
-    color: '#888',
-    border: '1px solid var(--line)',
-    borderRadius: 'var(--r-btn)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    minHeight: 44,
-  },
-  checkBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 7,
-    padding: '10px 20px',
-    fontSize: '0.9375rem',
-    fontWeight: 700,
-    background: 'var(--plum-700)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 'var(--r-btn)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    minHeight: 48,
-  },
-  checkBtnDisabled: {
-    background: '#ccc',
-    cursor: 'not-allowed',
   },
   checkingLabel: {
     fontWeight: 600,

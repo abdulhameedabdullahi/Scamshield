@@ -29,7 +29,7 @@ export default function SendPreview({ originalText, entities, regexOnly, onSend,
   }
 
   return (
-    <div style={S.wrap} role="dialog" aria-label="Before we search online">
+    <div style={S.wrap} className="bubble-enter" role="dialog" aria-label="Before we search online">
       {/* Title */}
       <div style={S.titleRow}>
         <span style={S.lockIcon} aria-hidden="true">🔒</span>
@@ -105,10 +105,10 @@ export default function SendPreview({ originalText, entities, regexOnly, onSend,
 
       {/* Buttons */}
       <div style={S.btnRow}>
-        <button style={S.cancelBtn} onClick={onCancel} type="button">
+        <button className="btn-ghost" onClick={onCancel} type="button">
           Cancel
         </button>
-        <button style={S.sendBtn} onClick={() => onSend(maskedText)} type="button">
+        <button className="btn-deeper" style={{ width: 'auto', marginBottom: 0 }} onClick={() => onSend(maskedText)} type="button">
           Search online
         </button>
       </div>
@@ -225,28 +225,5 @@ const S = {
     gap: 10,
     justifyContent: 'flex-end',
     flexWrap: 'wrap',
-  },
-  cancelBtn: {
-    padding: '10px 20px',
-    fontSize: '0.9375rem',
-    background: 'transparent',
-    color: '#666',
-    border: '1px solid var(--line)',
-    borderRadius: 'var(--r-btn)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    minHeight: 48,
-  },
-  sendBtn: {
-    padding: '10px 24px',
-    fontSize: '0.9375rem',
-    fontWeight: 700,
-    background: 'var(--plum-700)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 'var(--r-btn)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    minHeight: 48,
   },
 };

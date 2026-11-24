@@ -119,7 +119,7 @@ export default function VerdictCard({ result, originalText, onInvestigate }) {
       {/* Dig deeper button */}
       {onInvestigate && (
         <button
-          style={S.deeperBtn}
+          className="btn-deeper"
           onClick={onInvestigate}
           type="button"
         >
@@ -226,22 +226,6 @@ const S = {
     flexShrink: 0,
     marginTop: 1,
     fontSize: '1rem',
-  },
-  deeperBtn: {
-    display: 'block',
-    width: '100%',
-    padding: '12px 16px',
-    marginBottom: 14,
-    fontSize: '0.9375rem',
-    fontWeight: 700,
-    background: 'var(--plum-700)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 'var(--r-btn)',
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    textAlign: 'center',
-    minHeight: 48,
   },
   sourceLine: {
     fontSize: '0.8125rem',

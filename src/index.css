@@ -80,6 +80,12 @@ a { color: var(--plum-700); }
   border-radius: 4px;
 }
 
+/* ── Global button micro-interactions ─────────────────────────────────────── */
+
+button {
+  transition: transform 0.1s ease, opacity 0.12s ease;
+}
+
 /* ── Scrollbar (webkit) ────────────────────────────────────────────────────── */
 
 ::-webkit-scrollbar {
@@ -112,10 +118,11 @@ a { color: var(--plum-700); }
   gap: 12px;
   padding: 0 20px;
   height: 60px;
-  background: var(--plum-900);
+  background: linear-gradient(135deg, var(--plum-900) 0%, #3d1d55 100%);
   flex-shrink: 0;
   position: relative;
   z-index: 10;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.07), 0 2px 16px rgba(46,22,64,0.45);
 }
 
 /* ── Chat page ─────────────────────────────────────────────────────────────── */
@@ -132,6 +139,7 @@ a { color: var(--plum-700); }
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scroll-behavior: smooth;
 }
 
 .chat-inner {
@@ -289,4 +297,281 @@ a { color: var(--plum-700); }
 @keyframes pulseDot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+
+/* ── Bubble entrance (all incoming bubbles) ────────────────────────────────── */
+
+.bubble-enter {
+  animation: bubbleIn 210ms ease-out both;
+}
+
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.user-bubble-enter {
+  animation: userBubbleIn 190ms ease-out both;
+}
+
+@keyframes userBubbleIn {
+  from { opacity: 0; transform: translateX(10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Menu overlay + sheet animations ──────────────────────────────────────── */
+
+.menu-overlay {
+  animation: overlayFadeIn 200ms ease both;
+}
+
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.menu-sheet {
+  animation: sheetSlideIn 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes sheetSlideIn {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+/* ── Composer box with focus glow ──────────────────────────────────────────── */
+
+.composer-box {
+  background: #fff;
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-input);
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.composer-box:focus-within {
+  border-color: var(--plum-700);
+  box-shadow: 0 0 0 3px rgba(69, 36, 92, 0.11);
+}
+
+.composer-box.over-limit {
+  border-color: var(--scam);
+}
+
+.composer-box.over-limit:focus-within {
+  box-shadow: 0 0 0 3px rgba(180, 35, 24, 0.11);
+}
+
+/* ── Button classes ────────────────────────────────────────────────────────── */
+
+.btn-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 20px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  font-family: var(--font-body);
+  background: var(--plum-700);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  min-height: 48px;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+}
+.btn-check:not(:disabled):hover {
+  background: #5a2f78;
+  box-shadow: 0 4px 14px rgba(69,36,92,0.3);
+}
+.btn-check:not(:disabled):active {
+  transform: scale(0.97);
+  box-shadow: none;
+}
+.btn-check:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.btn-deeper {
+  display: block;
+  width: 100%;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  font-family: var(--font-body);
+  background: var(--plum-700);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  text-align: center;
+  min-height: 48px;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+}
+.btn-deeper:hover {
+  background: #5a2f78;
+  box-shadow: 0 4px 16px rgba(69,36,92,0.3);
+}
+.btn-deeper:active {
+  transform: scale(0.98);
+  box-shadow: none;
+}
+
+.btn-ghost {
+  padding: 8px 14px;
+  font-size: 0.875rem;
+  font-family: var(--font-body);
+  background: transparent;
+  color: #888;
+  border: 1px solid var(--line);
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  min-height: 44px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+}
+.btn-ghost:hover {
+  background: var(--plum-100);
+  color: var(--plum-700);
+  border-color: var(--plum-100);
+}
+.btn-ghost:active {
+  transform: scale(0.97);
+}
+
+.btn-outline-plum {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  font-size: 0.875rem;
+  font-family: var(--font-body);
+  background: var(--plum-100);
+  color: var(--plum-700);
+  border: 1px solid var(--line);
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  min-height: 44px;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.btn-outline-plum:hover {
+  background: #e0d6ed;
+  box-shadow: 0 1px 6px rgba(69,36,92,0.15);
+}
+.btn-outline-plum:active {
+  transform: scale(0.97);
+}
+
+/* ── Example chips ─────────────────────────────────────────────────────────── */
+
+.chip-example {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  font-size: 0.875rem;
+  font-family: var(--font-body);
+  font-weight: 500;
+  background: #fff;
+  color: var(--plum-700);
+  border: 1.5px solid var(--plum-100);
+  border-radius: var(--r-chip);
+  cursor: pointer;
+  min-height: 40px;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+}
+.chip-example:hover {
+  background: var(--plum-100);
+  border-color: var(--plum-700);
+  box-shadow: 0 2px 10px rgba(69,36,92,0.12);
+}
+.chip-example:active {
+  transform: scale(0.96);
+}
+
+/* ── Menu nav links ────────────────────────────────────────────────────────── */
+
+.menu-nav-link {
+  display: block;
+  padding: 14px 20px;
+  font-size: 1rem;
+  color: var(--ink);
+  text-decoration: none;
+  border-left: 3px solid transparent;
+  line-height: 1.4;
+  transition: background 0.15s, color 0.15s, padding-left 0.15s, border-left-color 0.15s;
+}
+.menu-nav-link:hover {
+  background: var(--plum-100);
+  color: var(--plum-700);
+  padding-left: 26px;
+  border-left-color: rgba(69,36,92,0.3);
+}
+.menu-nav-link.active {
+  color: var(--plum-700);
+  font-weight: 700;
+  border-left-color: var(--plum-700);
+  background: var(--plum-100);
+}
+
+/* ── Top bar button ────────────────────────────────────────────────────────── */
+
+.topbar-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  border-radius: 10px;
+  transition: background 0.15s, transform 0.1s;
+}
+.topbar-icon-btn:hover {
+  background: rgba(239,232,244,0.15);
+}
+.topbar-icon-btn:active {
+  transform: scale(0.9);
+}
+
+.topbar-new-check {
+  padding: 6px 14px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  background: rgba(239,232,244,0.15);
+  color: #EFE8F4;
+  border: 1px solid rgba(239,232,244,0.3);
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  flex-shrink: 0;
+  min-height: 36px;
+  transition: background 0.15s, transform 0.1s;
+}
+.topbar-new-check:hover {
+  background: rgba(239,232,244,0.25);
+}
+.topbar-new-check:active {
+  transform: scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble-enter       { animation: none; }
+  .user-bubble-enter  { animation: none; }
+  .menu-overlay       { animation: none; }
+  .menu-sheet         { animation: none; }
+  .btn-check,
+  .btn-deeper,
+  .btn-ghost,
+  .btn-outline-plum,
+  .chip-example,
+  .menu-nav-link,
+  .topbar-icon-btn,
+  .topbar-new-check,
+  button             { transition: none; }
 }
