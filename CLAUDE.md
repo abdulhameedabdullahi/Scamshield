@@ -73,34 +73,37 @@ any cloud call. The user always knows where their text goes.
 ```
 src/
   firebase.js           ← Firebase app init + App Check + getAI → exports app, ai
-  config.js             ← CLOUD_MODEL, APP_NAME, REPORTING_TIPS, ADVICE_BY_CATEGORY constants
+  config.js             ← CLOUD_MODEL, APP_NAME, REPORTING_TIPS, ADVICE_BY_CATEGORY, MASK_POLICY, MASK_POLICY_LABELS, PLACEHOLDER_TYPES
   ai/
     models.js           ← Creates & exports: onDeviceModel, cloudModel (2 models only — no PREFER_ON_DEVICE)
     availability.js     ← getOnDeviceAvailability(), initDeviceModel() helpers
-    regexMask.js        ← Standalone PII regex masker: regexMask(text) — no AI, runs synchronously
-    maskMessage.js      ← maskMessage(text) — imports from regexMask.js; NEVER falls back to cloud
+    regexMask.js        ← regexMask(text) sync masker; regexDetect(text) → [{text,type,start,end,source}]
+    maskMessage.js      ← 2-step pipeline: detectEntities(text) async (regex + on-device AI); buildMaskedText(text, entities, overrides) sync; NEVER falls back to cloud
     rules.js            ← analyzeSignals(text) → { signals, ruleScore } — pure JS rule engine
-    prompts.js          ← buildScamCheckPrompt(text, signals?, scamTrends?) — prompt with signal injection
-    schemas.js          ← SCAM_RESULT_SCHEMA (reasoning-first field order), SCAM_CHECK_GENERATION_CONFIG
-    checkMessage.js     ← Routing + rules+AI flow: checkMessage(), onDeviceCheck(), cloudCheck(),
+    prompts.js          ← buildScamCheckPrompt, buildMaskingPrompt, buildInvestigatePrompt
+    schemas.js          ← SCAM_RESULT_SCHEMA, SCAM_CHECK_GENERATION_CONFIG, MASKING_SCHEMA, MASKING_GENERATION_CONFIG
+    checkMessage.js     ← Routing + rules+AI flow: checkMessage(), onDeviceCheck(), cloudCheck(text, onChunk, premaskedText?),
                            downloadAndCheck(), preloadDeviceModel(), warmUpDeviceModel(), parseCheckResult()
-    investigate.js      ← Stub: investigate(maskedText) — ONLY_IN_CLOUD (TODO)
+    investigate.js      ← Google Search grounding: startInvestigation(maskedText, deviceVerdict, redFlags),
+                           continueInvestigation(session, followUpText) — ONLY_IN_CLOUD, retry with backoff
   services/
     reports.js          ← Stub: Firestore community reports (TODO)
   components/
     ModelStatus.jsx     ← On-device availability banner + pre-download button with progress bar
     MessageInput.jsx    ← Textarea, Check button, Clear button, char counter (2000 max)
-    VerdictCard.jsx     ← Result card with inline phrase highlighting, advice from config, second opinion button
+    VerdictCard.jsx     ← Result card with inline phrase highlighting, advice from config, second opinion + investigate buttons
     HighlightedMessage.jsx ← Renders text with coloured underline highlights and hover tooltips
-    ConsentDialog.jsx   ← Inline consent UI for the cloud check path
+    SendPreview.jsx     ← Chip-based entity preview before cloud calls; onSend(maskedText) only — placeholderMap never leaves
+    InvestigationPanel.jsx ← Cloud investigation UI: SimpleMarkdown, GroundingSection (shadow DOM), multi-turn follow-up
     DevTestPanel.jsx    ← Dev test UI: availability status + on-device/cloud hello-world buttons
   dev/
     testMessages.js     ← 20 synthetic test messages (IDs 1-20); expected may be array
     TestRunner.jsx      ← Batch test runner: FP/FN tracking, Export markdown + Export JSON buttons
     aiOnlyCheck.js      ← aiOnlyCheck(text) — on-device, no rules (v1 baseline for comparison)
+    maskTest.js         ← 12 unit tests for regexDetect + buildMaskedText; run via runMaskTests() in console
   data/
-    evalSnapshot.json   ← Placeholder { "placeholder": true }; paste exported JSON here for dashboard
-  App.jsx               ← Full app UI; second opinion flow; hash routing; nav bar; DevTestPanel + TestRunner behind toggle
+    evalSnapshot.json   ← Real test run data; paste fresh JSON export here to update dashboard
+  App.jsx               ← Full app UI; second opinion + investigate flows; hash routing; nav bar; DevTestPanel + TestRunner behind toggle
   main.jsx              ← Vite entry point (unchanged from template)
   index.css             ← Global styles (cleaned up from Vite template)
   components/

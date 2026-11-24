@@ -8,16 +8,12 @@ Run the in-app test suite to generate and paste results here:
 
 ## Run 2 — 2026-11-24 (session 7 fixes: brand compliance + cloud non-streaming + #19 FP fix)
 
-_Pending: start dev server and run all modes to populate this section._
-
 Changes since Run 1:
 - All real brand names replaced with fictional (Zenova Bank, Kora Bank, Halden Bank, Palmline Mobile, SwiftDrop Logistics, NovaPetro Resources, National Revenue Office)
 - Cloud path switched from streaming to `generateContent` — fixes the parse-stream errors on #4, #5, #6
 - `credential_request` post-filter uses sentence-boundary clause check — fixes #19 FP
 - `do_not_share` pattern extended to match "will never ask you to share/send"
 - `impersonation` pattern uses fictional agency names
-
-<!-- paste Run 2 export here -->
 
 ## ScamShield — Test Suite Results
 
