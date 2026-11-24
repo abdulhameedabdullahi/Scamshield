@@ -1,6 +1,44 @@
 // App-wide constants for ScamShield.
 // Centralising the cloud model name here means you only change it in one place.
 
+// Which entity types to mask vs keep when sending to cloud.
+// 'mask' = replaced with numbered placeholder before sending.
+// 'keep' = sent as-is because the value is needed to check scam databases.
+export const MASK_POLICY = {
+  person_name:    'mask',
+  address:        'mask',
+  date_of_birth:  'mask',
+  account_number: 'mask',
+  bvn_nin:        'mask',
+  otp_code:       'mask',
+  card_number:    'mask',
+  email:          'mask',
+  other_personal: 'mask',
+  phone_number:   'keep',
+  url:            'keep',
+};
+
+// Tooltip text for 'keep' entity types shown in SendPreview.
+export const MASK_POLICY_LABELS = {
+  phone_number: 'Kept so we can check whether this is a known scam number.',
+  url:          'Kept so we can check whether this is a known scam link.',
+};
+
+// Map entity types to placeholder prefix names.
+export const PLACEHOLDER_TYPES = {
+  person_name:    'NAME',
+  address:        'ADDRESS',
+  date_of_birth:  'DOB',
+  account_number: 'ACCOUNT',
+  bvn_nin:        'ID',
+  otp_code:       'OTP',
+  card_number:    'CARD',
+  email:          'EMAIL',
+  other_personal: 'PERSONAL',
+  phone_number:   'PHONE',
+  url:            'URL',
+};
+
 export const APP_NAME = 'ScamShield';
 
 // IMPORTANT: Verify this model name in the Firebase AI Logic docs before shipping.

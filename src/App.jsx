@@ -6,10 +6,12 @@ import {
   preloadDeviceModel, warmUpDeviceModel,
 } from './ai/checkMessage';
 import { analyzeSignals } from './ai/rules';
+import { detectEntities } from './ai/maskMessage';
 import ModelStatus from './components/ModelStatus';
 import MessageInput from './components/MessageInput';
 import VerdictCard from './components/VerdictCard';
-import ConsentDialog from './components/ConsentDialog';
+import SendPreview from './components/SendPreview';
+import InvestigationPanel from './components/InvestigationPanel';
 import DevTestPanel from './components/DevTestPanel';
 import TestRunner from './dev/TestRunner';
 import Dashboard from './components/dashboard/Dashboard';
@@ -19,9 +21,16 @@ import Dashboard from './components/dashboard/Dashboard';
 //   checking       → model is generating (streaming in progress)
 //   needs_download → model not downloaded; waiting for user gesture
 //   downloading    → preloadDeviceModel or downloadAndCheck in progress
-//   needs_consent  → on-device unavailable; waiting for consent to cloud check
+//   masking        → running detectEntities() before showing cloud SendPreview
+//   send_preview   → SendPreview shown for the first cloud check
 //   done           → result is ready
 //   error          → an error occurred
+//
+// Second opinion state machine:
+//   idle | masking | send_preview | checking | done | error
+//
+// Investigation state machine:
+//   idle | masking | send_preview | running
 
 export default function App() {
   const [page, setPage] = useState(
@@ -48,11 +57,23 @@ export default function App() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [charsReceived, setCharsReceived] = useState(0);
 
+  // ── Cloud send-preview state (first check path) ────────────────────────────
+  const [maskData, setMaskData] = useState(null); // { entities, regexOnly }
+
   // ── Second opinion state ───────────────────────────────────────────────────
-  // 'idle' | 'consent_pending' | 'checking' | 'done' | 'error'
+  // 'idle' | 'masking' | 'send_preview' | 'checking' | 'done' | 'error'
   const [secondOpinionState, setSecondOpinionState] = useState('idle');
+  const [secondMaskData, setSecondMaskData] = useState(null);
   const [secondResult, setSecondResult] = useState(null);
   const [secondErrorMsg, setSecondErrorMsg] = useState('');
+
+  // ── Investigation state ────────────────────────────────────────────────────
+  // 'idle' | 'masking' | 'send_preview' | 'running'
+  const [investigateState, setInvestigateState] = useState('idle');
+  const [investigateMaskData, setInvestigateMaskData] = useState(null);
+  const [investigateMaskedText, setInvestigateMaskedText] = useState(null);
+  // which result to investigate (main result or second opinion)
+  const [investigateVerdict, setInvestigateVerdict] = useState(null);
 
   // ── Instant rules preview ──────────────────────────────────────────────────
   const [preliminarySignals, setPreliminarySignals] = useState(null);
@@ -90,15 +111,22 @@ export default function App() {
     setText(newText);
     if (
       appState === 'done' || appState === 'error' ||
-      appState === 'needs_consent' || appState === 'needs_download'
+      appState === 'send_preview' || appState === 'masking' ||
+      appState === 'needs_download'
     ) {
       setAppState('idle');
       setResult(null);
       setErrorMsg('');
+      setMaskData(null);
     }
     setSecondOpinionState('idle');
     setSecondResult(null);
     setSecondErrorMsg('');
+    setSecondMaskData(null);
+    setInvestigateState('idle');
+    setInvestigateMaskData(null);
+    setInvestigateMaskedText(null);
+    setInvestigateVerdict(null);
     setPreliminarySignals(null);
   }
 
@@ -107,9 +135,15 @@ export default function App() {
     setAppState('idle');
     setResult(null);
     setErrorMsg('');
+    setMaskData(null);
     setSecondOpinionState('idle');
     setSecondResult(null);
     setSecondErrorMsg('');
+    setSecondMaskData(null);
+    setInvestigateState('idle');
+    setInvestigateMaskData(null);
+    setInvestigateMaskedText(null);
+    setInvestigateVerdict(null);
     setPreliminarySignals(null);
   }
 
@@ -117,15 +151,18 @@ export default function App() {
 
   async function handleCheck() {
     if (!text.trim()) return;
-    // analyzeSignals is synchronous — runs before the first await so the
-    // preliminary card appears in the same render batch as 'checking' state.
     const instant = analyzeSignals(text.trim());
     setAppState('checking');
     setResult(null);
     setErrorMsg('');
+    setMaskData(null);
     setSecondOpinionState('idle');
     setSecondResult(null);
     setSecondErrorMsg('');
+    setInvestigateState('idle');
+    setInvestigateMaskData(null);
+    setInvestigateMaskedText(null);
+    setInvestigateVerdict(null);
     setPreliminarySignals(instant);
     startProgress();
 
@@ -138,7 +175,16 @@ export default function App() {
         setAppState('needs_download');
       } else if (outcome.state === 'needs_consent') {
         setAvailability(outcome.availability);
-        setAppState('needs_consent');
+        // Start masking immediately (no consent dialog — go straight to SendPreview)
+        setAppState('masking');
+        try {
+          const md = await detectEntities(text);
+          setMaskData(md);
+          setAppState('send_preview');
+        } catch (err) {
+          setErrorMsg(err?.message ?? 'Failed to prepare masked text. Please try again.');
+          setAppState('error');
+        }
       } else {
         setResult(outcome);
         if (outcome.source === 'on-device') setAvailability('available');
@@ -186,15 +232,16 @@ export default function App() {
     }
   }, []);
 
-  // ── Cloud consent path (first check) ──────────────────────────────────────
+  // ── Cloud send-preview confirmed (first check path) ────────────────────────
 
-  async function handleConsent() {
+  async function handleCloudSendConfirm(maskedText) {
     setAppState('checking');
+    setMaskData(null);
     setResult(null);
     setErrorMsg('');
     startProgress();
     try {
-      const outcome = await cloudCheck(text, (chars) => setCharsReceived(chars));
+      const outcome = await cloudCheck(text, (chars) => setCharsReceived(chars), maskedText);
       stopProgress();
       setResult(outcome);
       setAppState('done');
@@ -205,22 +252,33 @@ export default function App() {
     }
   }
 
-  function handleDecline() {
+  function handleCloudSendCancel() {
     setAppState('idle');
+    setMaskData(null);
   }
 
   // ── Second opinion flow ────────────────────────────────────────────────────
 
-  function handleSecondOpinionRequest() {
-    setSecondOpinionState('consent_pending');
+  async function handleSecondOpinionRequest() {
+    setSecondOpinionState('masking');
     setSecondResult(null);
     setSecondErrorMsg('');
+    setSecondMaskData(null);
+    try {
+      const md = await detectEntities(text);
+      setSecondMaskData(md);
+      setSecondOpinionState('send_preview');
+    } catch (err) {
+      setSecondErrorMsg(err?.message ?? 'Failed to prepare masked text. Please try again.');
+      setSecondOpinionState('error');
+    }
   }
 
-  async function handleSecondOpinionConsent() {
+  async function handleSecondOpinionSendConfirm(maskedText) {
     setSecondOpinionState('checking');
+    setSecondMaskData(null);
     try {
-      const outcome = await cloudCheck(text, (chars) => setCharsReceived(chars));
+      const outcome = await cloudCheck(text, (chars) => setCharsReceived(chars), maskedText);
       setSecondResult(outcome);
       setSecondOpinionState('done');
     } catch (err) {
@@ -229,8 +287,43 @@ export default function App() {
     }
   }
 
-  function handleSecondOpinionDecline() {
+  function handleSecondOpinionSendCancel() {
     setSecondOpinionState('idle');
+    setSecondMaskData(null);
+  }
+
+  // ── Investigation flow ─────────────────────────────────────────────────────
+
+  async function handleInvestigateRequest(verdictResult) {
+    setInvestigateState('masking');
+    setInvestigateMaskData(null);
+    setInvestigateMaskedText(null);
+    setInvestigateVerdict(verdictResult);
+    try {
+      const md = await detectEntities(text);
+      setInvestigateMaskData(md);
+      setInvestigateState('send_preview');
+    } catch (err) {
+      setInvestigateState('idle');
+      console.error('[ScamShield] Investigation masking failed:', err?.message);
+    }
+  }
+
+  function handleInvestigateSendConfirm(maskedText) {
+    setInvestigateMaskedText(maskedText);
+    setInvestigateMaskData(null);
+    setInvestigateState('running');
+  }
+
+  function handleInvestigateSendCancel() {
+    setInvestigateState('idle');
+    setInvestigateMaskData(null);
+  }
+
+  function handleInvestigateClose() {
+    setInvestigateState('idle');
+    setInvestigateMaskedText(null);
+    setInvestigateVerdict(null);
   }
 
   // ── Derived state ──────────────────────────────────────────────────────────
@@ -286,21 +379,6 @@ export default function App() {
         onDownloadRequest={handlePreload}
       />
 
-      {/* Consent gate — first cloud check */}
-      {appState === 'needs_consent' && (
-        <ConsentDialog onConsent={handleConsent} onDecline={handleDecline} />
-      )}
-
-      {/* Consent gate — second opinion */}
-      {secondOpinionState === 'consent_pending' && (
-        <div style={styles.secondConsentWrap}>
-          <ConsentDialog
-            onConsent={handleSecondOpinionConsent}
-            onDecline={handleSecondOpinionDecline}
-          />
-        </div>
-      )}
-
       {/* Message input */}
       <MessageInput
         value={text}
@@ -329,6 +407,14 @@ export default function App() {
         </div>
       )}
 
+      {/* Masking progress (before showing SendPreview) */}
+      {(appState === 'masking' || secondOpinionState === 'masking' || investigateState === 'masking') && (
+        <div style={styles.maskingBox}>
+          <span style={styles.progressDot} />
+          <span style={styles.progressText}>Detecting personal details on your device…</span>
+        </div>
+      )}
+
       {/* Download-and-check prompt */}
       {appState === 'needs_download' && (
         <div style={styles.downloadPrompt}>
@@ -352,6 +438,19 @@ export default function App() {
         </div>
       )}
 
+      {/* Send preview — first cloud check */}
+      {appState === 'send_preview' && maskData && (
+        <div style={styles.sendPreviewWrap}>
+          <SendPreview
+            originalText={text}
+            entities={maskData.entities}
+            regexOnly={maskData.regexOnly}
+            onSend={handleCloudSendConfirm}
+            onCancel={handleCloudSendCancel}
+          />
+        </div>
+      )}
+
       {/* Error */}
       {appState === 'error' && errorMsg && (
         <div style={styles.errorBox}>
@@ -366,6 +465,20 @@ export default function App() {
             result={result}
             originalText={text}
             onSecondOpinion={secondOpinionState === 'idle' ? handleSecondOpinionRequest : undefined}
+            onInvestigate={investigateState === 'idle' ? () => handleInvestigateRequest(result) : undefined}
+          />
+        </div>
+      )}
+
+      {/* Second opinion — send preview */}
+      {secondOpinionState === 'send_preview' && secondMaskData && (
+        <div style={styles.sendPreviewWrap}>
+          <SendPreview
+            originalText={text}
+            entities={secondMaskData.entities}
+            regexOnly={secondMaskData.regexOnly}
+            onSend={handleSecondOpinionSendConfirm}
+            onCancel={handleSecondOpinionSendCancel}
           />
         </div>
       )}
@@ -381,7 +494,35 @@ export default function App() {
       {secondOpinionState === 'done' && secondResult && (
         <div style={styles.secondResultWrap}>
           <div style={styles.secondResultHeader}>Second opinion from cloud</div>
-          <VerdictCard result={secondResult} originalText={text} />
+          <VerdictCard
+            result={secondResult}
+            originalText={text}
+            onInvestigate={investigateState === 'idle' ? () => handleInvestigateRequest(secondResult) : undefined}
+          />
+        </div>
+      )}
+
+      {/* Investigation — send preview */}
+      {investigateState === 'send_preview' && investigateMaskData && (
+        <div style={styles.sendPreviewWrap}>
+          <SendPreview
+            originalText={text}
+            entities={investigateMaskData.entities}
+            regexOnly={investigateMaskData.regexOnly}
+            onSend={handleInvestigateSendConfirm}
+            onCancel={handleInvestigateSendCancel}
+          />
+        </div>
+      )}
+
+      {/* Investigation panel */}
+      {investigateState === 'running' && investigateMaskedText && (
+        <div style={styles.investigateWrap}>
+          <InvestigationPanel
+            maskedText={investigateMaskedText}
+            deviceVerdict={investigateVerdict}
+            onClose={handleInvestigateClose}
+          />
         </div>
       )}
 
@@ -410,7 +551,6 @@ export default function App() {
 
 function PreliminaryCard({ signals }) {
   const riskSignals = signals.signals.filter((s) => s.weight > 0 && s.phrase);
-  // Deduplicate by signal id so we show one bullet per signal type
   const seen = new Set();
   const unique = riskSignals.filter((s) => {
     if (seen.has(s.id)) return false;
@@ -549,6 +689,18 @@ const styles = {
     fontSize: '0.875rem',
     color: '#1e3a8a',
   },
+  maskingBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: '10px 14px',
+    marginTop: 12,
+    background: '#f0fdf4',
+    border: '1px solid #bbf7d0',
+    borderRadius: 8,
+    fontSize: '0.875rem',
+    color: '#14532d',
+  },
   progressDot: {
     display: 'inline-block',
     width: 8,
@@ -614,6 +766,9 @@ const styles = {
     cursor: 'pointer',
     fontFamily: 'inherit',
   },
+  sendPreviewWrap: {
+    marginTop: 16,
+  },
   errorBox: {
     background: '#fef2f2',
     border: '1px solid #fca5a5',
@@ -627,9 +782,6 @@ const styles = {
   resultWrap: {
     marginTop: 20,
   },
-  secondConsentWrap: {
-    marginTop: 12,
-  },
   secondResultWrap: {
     marginTop: 20,
   },
@@ -640,6 +792,9 @@ const styles = {
     textTransform: 'uppercase',
     letterSpacing: '0.06em',
     marginBottom: 8,
+  },
+  investigateWrap: {
+    marginTop: 20,
   },
   devSection: {
     marginTop: 48,

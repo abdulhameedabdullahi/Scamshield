@@ -66,7 +66,7 @@ function getCategoryLabel(verdict, category) {
   return CATEGORY_LABELS[category] ?? category;
 }
 
-export default function VerdictCard({ result, originalText, onSecondOpinion }) {
+export default function VerdictCard({ result, originalText, onSecondOpinion, onInvestigate }) {
   const cfg = VERDICT_CONFIG[result.verdict] ?? VERDICT_CONFIG.suspicious;
   const categoryLabel = getCategoryLabel(result.verdict, result.category);
   const confidenceLabel = CONFIDENCE_LABELS[result.confidence] ?? result.confidence;
@@ -164,6 +164,20 @@ export default function VerdictCard({ result, originalText, onSecondOpinion }) {
             >
               Not sure? Get a second opinion from the cloud
               <span style={styles.secondOpinionNote}> (personal details masked)</span>
+            </button>
+          </div>
+        )}
+
+        {/* Investigate deeper button — shown for all verdicts when callback provided */}
+        {onInvestigate && (
+          <div style={styles.investigateRow}>
+            <button
+              style={styles.investigateBtn}
+              onClick={onInvestigate}
+              type="button"
+            >
+              {isSafe ? 'Still unsure? Investigate deeper' : 'Investigate deeper'}
+              <span style={styles.investigateNote}> — searches links & numbers online</span>
             </button>
           </div>
         )}
@@ -288,7 +302,7 @@ const styles = {
     marginBottom: 2,
   },
   secondOpinionRow: {
-    marginBottom: 14,
+    marginBottom: 10,
   },
   secondOpinionBtn: {
     padding: '7px 14px',
@@ -304,6 +318,24 @@ const styles = {
   secondOpinionNote: {
     fontWeight: 400,
     opacity: 0.8,
+  },
+  investigateRow: {
+    marginBottom: 14,
+  },
+  investigateBtn: {
+    padding: '7px 14px',
+    fontSize: '0.82rem',
+    fontWeight: 600,
+    background: '#eff6ff',
+    border: '1px solid #93c5fd',
+    borderRadius: 6,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    color: '#1e40af',
+  },
+  investigateNote: {
+    fontWeight: 400,
+    opacity: 0.75,
   },
   footer: {
     display: 'flex',

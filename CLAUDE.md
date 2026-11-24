@@ -22,8 +22,8 @@ using Firebase AI Logic **hybrid inference**.
 | 1. Quick scam check | On-device (Gemini Nano) | `ONLY_ON_DEVICE` | Explicit routing — user is always told where their text goes. Returns structured JSON: `{ verdict, confidence, category, redFlags, summary, advice }`. |
 | 2. Cloud scam check (consent-gated) | Cloud | `ONLY_IN_CLOUD` | Only after user consent. regexMask() runs first — raw PII never leaves device. |
 | 3. Mask personal details | On-device ONLY + regex | `ONLY_ON_DEVICE` | Names, account numbers, phone, emails, BVN/NIN. **Must NEVER fall back to cloud.** |
-| 4. "Investigate deeper" | Cloud | `ONLY_IN_CLOUD` + Google Search grounding | Multi-turn chat. Uses masked text only. (🚧 not yet built) |
-| 5. No-Nano devices | Regex mask + explicit consent | `ONLY_IN_CLOUD` | Graceful degradation |
+| 4. "Investigate deeper" | Cloud | `ONLY_IN_CLOUD` + Google Search grounding | Multi-turn chat. Uses masked text only. Built in session 7. |
+| 5. No-Nano devices | Regex + on-device AI masking + SendPreview | `ONLY_IN_CLOUD` | Graceful degradation; user reviews masked text in SendPreview before any cloud call |
 
 **WHY `PREFER_ON_DEVICE` WAS REMOVED (session 3):**
 `PREFER_ON_DEVICE` silently falls back to cloud when Gemini Nano is unavailable, sending raw
@@ -383,3 +383,85 @@ The `computeStats()` function in TestRunner.jsx returns `firstMs`, but the snaps
 
 ### Bug fixes in session 6
 - Removed unused `fp` / `fn` variables from `computeLiveModeStats` in `Dashboard.jsx` (ESLint no-unused-vars)
+
+---
+
+## Decisions made in session 7 (On-device masking + Investigate deeper)
+
+### Feature A — On-device masking + SendPreview
+
+**Problem:** The existing cloud consent path used a simple ConsentDialog (yes/no) with only regex masking. Users had no visibility into what was being masked, and masking was regex-only (missed names, addresses, DOBs).
+
+**Solution:** 2-step entity detection + SendPreview chip UI.
+
+#### Masking pipeline (`src/ai/maskMessage.js`)
+1. **Step 1 (regex, always):** `regexDetect(text)` returns `[{text, type, start, end, source: 'regex'}]` for: OTP codes (keyword context), URLs, emails, card numbers, Nigerian phone numbers, labelled/standalone BVN/NIN, account numbers, generic international phone numbers. Overlaps resolved by preferring longer matches.
+2. **Step 2 (on-device AI, skipped if Nano unavailable):** `onDeviceModel.generateContent` with `MASKING_SCHEMA` asks Gemini Nano to find: `person_name`, `address`, `date_of_birth`, `other_personal`. Each AI entity is verified to exist in the original text (case-insensitive) — hallucinated ones dropped.
+3. **Merge:** regex entities first; AI entities added only if non-overlapping.
+4. **`buildMaskedText(text, entities, overrides)`:** pure function; assigns numbered placeholders per type (`[NAME_1]`, `[ACCOUNT_1]`, etc.); returns `{ maskedText, placeholderMap, entityPlaceholders }`. `placeholderMap` stays in memory only — never sent.
+5. **`detectEntities(text)`:** async; returns `{ entities, regexOnly }`.
+
+#### MASK_POLICY (`src/config.js`)
+- **Masked by default:** `person_name, address, date_of_birth, account_number, bvn_nin, otp_code, card_number, email, other_personal`
+- **Kept by default (evidence):** `phone_number, url` — tooltip: "Kept so we can check whether this is a known scam."
+- Also exports `PLACEHOLDER_TYPES` and `MASK_POLICY_LABELS`.
+
+#### SendPreview (`src/components/SendPreview.jsx`)
+- Receives `originalText, entities, regexOnly` from App.jsx (after `detectEntities` completes).
+- Renders original text with entities as inline clickable chips.
+  - Masked chip: red background, shows placeholder `[ACCOUNT_1]` with struck-through original text; click to keep.
+  - Kept chip: blue background, shows original text + "evidence" label; click to mask.
+- Shows final masked text preview below: "This exact text will be sent:" in a monospace box.
+- Buttons: "Cancel" / "Send for investigation".
+- Badge: "Basic masking only — private AI unavailable" when `regexOnly=true`.
+- `onSend(maskedText)` only receives the masked string — `placeholderMap` never leaves the component.
+
+#### ConsentDialog removed from cloud flows
+All three cloud call paths now go through SendPreview:
+- **First check (needs_consent path):** `appState: 'masking'` → `detectEntities` → `appState: 'send_preview'` → SendPreview → confirmed → `cloudCheck(text, onChunk, maskedText)`.
+- **Second opinion:** `secondOpinionState: 'masking'` → `detectEntities` → `secondOpinionState: 'send_preview'` → SendPreview → confirmed → `cloudCheck(text, onChunk, maskedText)`.
+- **Investigate deeper:** `investigateState: 'masking'` → `detectEntities` → `investigateState: 'send_preview'` → SendPreview → confirmed → `InvestigationPanel`.
+
+#### `cloudCheck` modified
+Added optional `premaskedText = null` parameter. When provided (from SendPreview), skips internal `regexMask()`. Fallback to `regexMask(text)` if not provided.
+
+#### `maskMessage` backward compat
+`maskMessage(text)` still exported but now calls `detectEntities` + `buildMaskedText` internally. Used by nothing in the main app paths (all cloud calls go through SendPreview now), but kept for test compatibility.
+
+### Feature B — Investigate deeper (`src/ai/investigate.js`)
+
+**Google Search grounding:** confirmed from `@firebase/ai` typings — `GoogleSearchTool = { googleSearch: {} }`. Passed to `cloudModel.startChat({ tools: [{ googleSearch: {} }] })`.
+
+**Two exported functions:**
+- `startInvestigation(maskedText, deviceVerdict, redFlags)` → `{ session, text, groundingMetadata }`. Sends first turn via `buildInvestigatePrompt`.
+- `continueInvestigation(session, followUpText)` → `{ text, groundingMetadata, maskedFollowUp }`. Applies `regexMask(followUpText)` before sending so any numbers the user types are protected.
+
+**Grounding metadata:** `response.candidates[0].groundingMetadata` → `{ groundingChunks[].web.{title,uri}, searchEntryPoint.renderedContent }`.
+
+**Retry:** `retryWithBackoff(fn, maxRetries=3)` with 1.5× exponential backoff, capped at 15s. Retries only on 429 / rate-limit errors.
+
+### InvestigationPanel (`src/components/InvestigationPanel.jsx`)
+
+- Starts investigation on mount (`useEffect`, `loading=true` initial state to avoid lint error).
+- Message thread: user messages (right-aligned blue bubble), assistant messages (SimpleMarkdown).
+- **SimpleMarkdown renderer:** no library. Handles `##`/`###` headings, `- ` / `* ` bullets, `**bold**` inline splits. Paragraphs for other non-empty lines.
+- **GroundingSection:** sources list (title + link from `groundingChunks[].web`) + `SearchEntryPoint` component that creates a shadow DOM and sets `innerHTML = renderedContent` (required by Google TOS).
+- Follow-up input: `Enter` sends; `Shift+Enter` newline. Regex masking note shown below input.
+- Badge: `☁️ Cloud investigation · masked text only · sources from Google Search`.
+
+### VerdictCard update
+Added `onInvestigate` prop and "Investigate deeper" button for ALL verdicts (safe: "Still unsure? Investigate deeper", non-safe: "Investigate deeper — searches links & numbers online").
+
+### New files
+- **`src/ai/regexMask.js`** (UPDATED) — added `regexDetect(text)` export
+- **`src/ai/schemas.js`** (UPDATED) — added `MASKING_SCHEMA`, `MASKING_GENERATION_CONFIG`
+- **`src/ai/prompts.js`** (UPDATED) — added `buildMaskingPrompt(text)`, `buildInvestigatePrompt(maskedText, deviceVerdict, redFlags)`
+- **`src/config.js`** (UPDATED) — added `MASK_POLICY`, `MASK_POLICY_LABELS`, `PLACEHOLDER_TYPES`
+- **`src/ai/maskMessage.js`** (REWRITTEN) — full 2-step pipeline; exports `detectEntities`, `buildMaskedText`, `maskMessage`
+- **`src/ai/checkMessage.js`** (UPDATED) — `cloudCheck` accepts optional `premaskedText` param
+- **`src/ai/investigate.js`** (IMPLEMENTED) — Google Search grounding + multi-turn chat
+- **`src/components/SendPreview.jsx`** (NEW) — chip-based masking preview
+- **`src/components/InvestigationPanel.jsx`** (NEW) — cloud investigation + grounding display
+- **`src/components/VerdictCard.jsx`** (UPDATED) — `onInvestigate` prop + "Investigate deeper" button
+- **`src/App.jsx`** (REWRITTEN) — full integration of SendPreview + InvestigationPanel; ConsentDialog removed from all cloud paths
+- **`src/dev/maskTest.js`** (NEW) — 12 unit tests for `regexDetect` + `buildMaskedText`

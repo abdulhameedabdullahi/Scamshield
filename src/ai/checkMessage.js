@@ -273,20 +273,20 @@ export async function onDeviceCheck(text, onChunk) {
 }
 
 /**
- * Regex-mask then cloud-check using a non-streaming call for reliability.
- * generateContentStream with responseSchema can silently drop chunks mid-stream;
- * generateContent waits for the full response before any parsing.
- * Only called after the user has explicitly consented (ConsentDialog).
+ * Cloud-check a message. When premaskedText is supplied (from SendPreview), it is used
+ * directly. Otherwise falls back to regexMask(text) so the function stays safe.
+ * Only called after the user has seen and confirmed the masked text in SendPreview.
  *
- * @param {string} text - Raw message text; will be masked before leaving device
+ * @param {string} text - Original (raw) message text — used for signal analysis only
  * @param {(totalChars: number) => void} [onChunk] - called once with final char count
+ * @param {string|null} [premaskedText] - Pre-masked text from SendPreview; skip internal masking
  */
-export async function cloudCheck(text, onChunk) {
+export async function cloudCheck(text, onChunk, premaskedText = null) {
   const start = Date.now();
 
   // Analyze signals from original text before masking — positions are in original text
   const { signals, ruleScore } = analyzeSignals(text);
-  const masked = regexMask(text);
+  const masked = premaskedText ?? regexMask(text);
 
   let raw;
   try {

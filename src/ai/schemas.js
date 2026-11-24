@@ -65,3 +65,31 @@ export const SCAM_CHECK_GENERATION_CONFIG = {
   responseMimeType: 'application/json',
   responseSchema: SCAM_RESULT_SCHEMA,
 };
+
+// ── Masking schema ─────────────────────────────────────────────────────────────
+// Used for the on-device AI entity-detection step in maskMessage.js.
+// The model only identifies personal details regex can't catch (names, addresses, DOB).
+
+const MASKING_ENTITY_ITEM = Schema.object({
+  properties: {
+    text: Schema.string({ description: 'Exact substring from the message to be masked' }),
+    type: Schema.enumString({
+      enum: ['person_name', 'address', 'date_of_birth', 'other_personal'],
+      description: 'Category of personal information',
+    }),
+  },
+});
+
+export const MASKING_SCHEMA = Schema.object({
+  properties: {
+    entities: Schema.array({
+      items: MASKING_ENTITY_ITEM,
+      description: 'Personal details found in the message (excluding numbers, URLs, emails)',
+    }),
+  },
+});
+
+export const MASKING_GENERATION_CONFIG = {
+  responseMimeType: 'application/json',
+  responseSchema: MASKING_SCHEMA,
+};

@@ -52,10 +52,11 @@ ScamShield uses a **Rules + AI** hybrid architecture designed for the limited ca
 |------|-------|---------------|-------------------|
 | Rule engine | On-device (pure JS) | — | No network at all |
 | Scam check — on-device | Gemini Nano | `ONLY_ON_DEVICE` | Raw text stays on device |
-| Scam check — second opinion | Cloud (Gemini) | `ONLY_IN_CLOUD` | Explicit consent + regex masking first |
-| Personal data masking | On-device only | `ONLY_ON_DEVICE` | Raw PII **never** leaves the device |
-| Deep investigation | Cloud | `ONLY_IN_CLOUD` | Masked text only (🚧) |
-| Devices without Gemini Nano | Cloud (consent-gated) | `ONLY_IN_CLOUD` | Explicit consent + masking; informed degradation |
+| Entity detection (masking step 2) | Gemini Nano | `ONLY_ON_DEVICE` | Names, addresses, DOB detected locally |
+| PII masking | On-device (regex + AI) | `ONLY_ON_DEVICE` | Placeholder map **never** leaves device |
+| Scam check / second opinion — cloud | Cloud (Gemini) | `ONLY_IN_CLOUD` | SendPreview gate: user reviews masked text |
+| Deep investigation | Cloud | `ONLY_IN_CLOUD` + Google Search | Masked text only; sources cited |
+| Devices without Gemini Nano | Cloud (consent-gated) | `ONLY_IN_CLOUD` | SendPreview masking gate; informed degradation |
 
 ---
 
@@ -98,17 +99,16 @@ flowchart TD
 - ✅ On-device inference with Gemini Nano (ONLY_ON_DEVICE model)
 - ✅ Cloud inference (ONLY_IN_CLOUD model, Gemini Developer API)
 - ✅ App Check with reCAPTCHA Enterprise (dev debug token support)
-- ✅ Regex-based PII masker (phone, email, account numbers, BVN/NIN, card numbers)
-- ✅ On-device availability detection (`LanguageModel.availability()`)
 - ✅ **Rules + AI hybrid** — rule engine provides grounded signals; AI reasons about them; evidence check prevents hallucinated red flags
 - ✅ **Scam check feature** — structured JSON output (verdict, confidence, category, redFlags with phrase+reason, explanation)
-- ✅ **Explicit hybrid routing** — on-device → download prompt → cloud (consent-gated); no silent fallbacks
-- ✅ **Second opinion flow** — cloud check offered for suspicious/low-confidence verdicts; consent-gated; PII masked first
-- ✅ **Full production UI** — ModelStatus, MessageInput, VerdictCard (with inline phrase highlights), ConsentDialog components
-- ✅ **Developer test harness** — 18 synthetic test messages (9 scam types + 5 legit + 4 edge cases), FP/FN tracking, markdown export
-- 🚧 On-device PII masking with Gemini Nano (regex masking is active; AI-enhanced masking planned)
-- 🚧 Deep investigation with Google Search grounding
-- 🚧 Multi-turn follow-up chat
+- ✅ **Explicit hybrid routing** — on-device → download prompt → cloud (SendPreview-gated); no silent fallbacks
+- ✅ **On-device PII masking** — 2-step: regex detects numbers/emails/URLs; Gemini Nano detects names, addresses, DOBs. Placeholder map stays on device.
+- ✅ **SendPreview** — user reviews detected entities as chips before any cloud call; can toggle each entity between masked/kept. `onSend(maskedText)` only receives the masked string.
+- ✅ **Second opinion flow** — cloud check offered for non-safe verdicts; full SendPreview gate; PII masked first
+- ✅ **Investigate deeper** — cloud model with Google Search grounding; multi-turn follow-up chat; sources from Google Search rendered per TOS (shadow DOM); follow-up messages auto regex-masked
+- ✅ **Full production UI** — ModelStatus, MessageInput, VerdictCard (with inline phrase highlights), SendPreview, InvestigationPanel
+- ✅ **Developer test harness** — 20 synthetic test messages, FP/FN tracking, markdown/JSON export, 4 inference modes (AI-only / Rules+AI / Cloud / Hybrid)
+- ✅ **In-app accuracy dashboard** (`#/accuracy`) — comparison chart, per-message table, live run
 - 🚧 Screenshot / image input (OCR via Gemini Nano)
 - 🚧 Firestore community reports
 - 🚧 Remote Config scam trend injection
@@ -293,11 +293,14 @@ were created for this submission.
 ## Privacy and Security
 
 - **On-device first**: scam checks run locally by default — no message text is sent anywhere.
-- **Masking gate**: personal details are stripped on-device before any cloud call.
-  `maskMessage.js` uses `ONLY_ON_DEVICE`; it will throw rather than fall back to cloud.
+- **Masking policy**: before any cloud call, personal details are replaced with numbered placeholders on-device.
+  - **Masked by default**: names, addresses, dates of birth, account numbers, BVN/NIN, OTP codes, card numbers, emails.
+  - **Kept as evidence**: phone numbers and URLs (needed to check if they appear in known scam databases). Labelled "evidence" in SendPreview.
+  - The placeholder→original map is kept only in browser memory and is never sent, stored, or logged.
+- **User in control**: `SendPreview` shows every detected entity as a chip before any cloud call. The user can tap to toggle any item between masked and kept.
+- **maskMessage.js uses `ONLY_ON_DEVICE`**: the on-device AI masking step will throw rather than fall back to cloud. If Nano is unavailable, regex masking is used and the UI notes "basic masking only".
 - **App Check**: every Firebase API call is validated with reCAPTCHA Enterprise.
-- **No secrets in the repo**: `.env.local` is gitignored; the reCAPTCHA secret key
-  and debug tokens are never committed.
+- **No secrets in the repo**: `.env.local` is gitignored; the reCAPTCHA secret key and debug tokens are never committed.
 - **Anonymous reports**: Firestore reports contain only masked text and AI verdicts.
 
 ---
