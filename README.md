@@ -12,7 +12,7 @@
 
 Scam messages are a daily reality across Nigeria and similar regions:
 
-- **Fake bank alerts** — "Your GTBank account has been debited ₦50,000…"
+- **Fake bank alerts** — "Your Zenova Bank account has been debited ₦50,000…"
 - **BVN/NIN phishing** — "Provide your BVN to avoid account suspension"
 - **Job scams** — "You have been shortlisted. Pay ₦5,000 for registration"
 - **Fake transfer alerts** — Fabricated screenshots used to defraud vendors

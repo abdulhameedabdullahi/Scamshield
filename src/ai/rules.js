@@ -70,7 +70,7 @@ const RULES = [
     id: 'impersonation',
     label: 'Claims official identity',
     weight: 3,
-    pattern: /\b(customer\s+care|from\s+(cbn|efcc|nitda|firs)\b|cbn\s+(forex|representative|official|agent|division)|bank\s+verification\s+(number|unit)|federal\s+government\s+(recruitment|scheme|grant)|npower\b|nigeria\s+customs)\b/,
+    pattern: /\b(customer\s+care|national\s+revenue\s+office|federal\s+crimes\s+bureau|federal\s+recruitment\s+board|bank\s+verification\s+(number|unit)|federal\s+government\s+(recruitment|scheme|grant)|national\s+customs)\b/,
   },
   {
     id: 'ai_instruction',
@@ -86,7 +86,8 @@ const RULES = [
     id: 'do_not_share',
     label: 'Legitimate do-not-share warning',
     weight: -4,
-    pattern: /do\s+not\s+share\s+this\s+(code|otp|pin|password)|never\s+share\s+(this|your)\s+(otp|code|pin|password)|will\s+never\s+ask\s+(you\s+)?for\s+(?:your\s+|this\s+)?(otp|code|pin|password)/,
+    // Also covers "will never ask you to share/send" (not just "ask you FOR")
+    pattern: /do\s+not\s+share\s+this\s+(code|otp|pin|password)|never\s+share\s+(this|your)\s+(otp|code|pin|password)|(will\s+)?never\s+ask\s+(you\s+)?(?:for\s+|to\s+(?:share|send|give)\s+)(?:your\s+|this\s+)?(otp|code|pin|password|token)/,
   },
   {
     id: 'masked_account',
@@ -137,14 +138,25 @@ export function analyzeSignals(text) {
     });
   }
 
-  // credential_request post-filter: drop matches that are part of a protective
-  // "do not share / never share" phrase. Only fire when the message ASKS the reader
-  // to share/send credentials — not when it warns them not to.
+  // credential_request post-filter: drop matches where a protective negation
+  // appears within the same clause before the share/send verb.
+  // Uses sentence-boundary detection so "has never been safer. Share your code"
+  // is NOT suppressed (negation is in a prior sentence).
   const filtered = signals.filter((s) => {
     if (s.id !== 'credential_request') return true;
-    // Look at up to 30 chars before the matched verb for a negation word
-    const before = text.slice(Math.max(0, s.start - 30), s.start).toLowerCase();
-    return !/(do\s+not|don'?t|never|will\s+never|not\s+ask)\s*$/.test(before);
+    // Take up to 60 chars before the matched verb position
+    const before60 = text.slice(Math.max(0, s.start - 60), s.start);
+    // Find the last sentence boundary inside that window
+    const lastBoundary = Math.max(
+      before60.lastIndexOf('.'),
+      before60.lastIndexOf('!'),
+      before60.lastIndexOf('?'),
+      -1,
+    );
+    // The clause is everything after that boundary (i.e. same sentence as the verb)
+    const clauseBefore = before60.slice(lastBoundary + 1).toLowerCase();
+    // If a negation word appears within ~6 words before the verb, it's protective
+    return !/(do\s+not|don'?t|never|will\s+never|no\s+one\s+will|nobody\s+should|not\s+ask)\b/.test(clauseBefore);
   });
 
   const ruleScore = filtered.reduce((sum, s) => sum + s.weight, 0);

@@ -10,7 +10,7 @@ export const CLOUD_MODEL = 'gemini-3.5-flash-lite';
 
 // Static reporting tips shown for scam/suspicious verdicts.
 // These are general-purpose and safe to show without AI generating them.
-// TODO: add official Nigerian reporting URLs (EFCC, CBN, NITDA) once verified — no links hard-coded yet.
+// TODO: add official reporting URLs once verified — no links hard-coded yet.
 export const REPORTING_TIPS = [
   "Don't reply, click any links, or send money.",
   'Contact your bank through its official app or the number on the back of your card.',

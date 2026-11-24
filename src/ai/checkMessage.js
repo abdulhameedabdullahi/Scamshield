@@ -264,11 +264,13 @@ export async function onDeviceCheck(text, onChunk) {
 }
 
 /**
- * Regex-mask then cloud-check using streaming for live progress updates.
+ * Regex-mask then cloud-check using a non-streaming call for reliability.
+ * generateContentStream with responseSchema can silently drop chunks mid-stream;
+ * generateContent waits for the full response before any parsing.
  * Only called after the user has explicitly consented (ConsentDialog).
  *
  * @param {string} text - Raw message text; will be masked before leaving device
- * @param {(totalChars: number) => void} [onChunk]
+ * @param {(totalChars: number) => void} [onChunk] - called once with final char count
  */
 export async function cloudCheck(text, onChunk) {
   const start = Date.now();
@@ -277,19 +279,30 @@ export async function cloudCheck(text, onChunk) {
   const { signals, ruleScore } = analyzeSignals(text);
   const masked = regexMask(text);
 
-  const streamResult = await cloudModel.generateContentStream(buildRequest(masked, signals));
-
-  let charsReceived = 0;
-  for await (const chunk of streamResult.stream) {
-    const chunkText = chunk.text();
-    charsReceived += chunkText.length;
-    try { onChunk?.(charsReceived); } catch { /* ignore callback errors */ }
+  let raw;
+  try {
+    const result = await cloudModel.generateContent(buildRequest(masked, signals));
+    raw = result.response.text();
+    console.log('[ScamShield] Cloud response preview:', raw?.slice(0, 200));
+  } catch (err) {
+    // Log the exact error and any raw response payload for diagnosis
+    console.error('[ScamShield] Cloud generateContent error:', err?.message ?? String(err));
+    console.error('[ScamShield] Cloud error detail:', err);
+    if (err?.response) {
+      try {
+        const errRaw = err.response.text?.();
+        if (errRaw) console.error('[ScamShield] Cloud error raw response:', errRaw.slice(0, 300));
+      } catch { /* response may not have a text() method in all SDK versions */ }
+    }
+    throw err;
   }
 
-  const raw = (await streamResult.response).text();
   const aiResult = parseCheckResult(raw);
   // Evidence check runs against masked text (what the AI saw)
   const finalResult = applyConsistency(masked, aiResult, signals, ruleScore);
+
+  // Single callback with final char count (non-streaming)
+  try { onChunk?.(raw.length); } catch { /* ignore callback errors */ }
 
   return {
     ...finalResult,

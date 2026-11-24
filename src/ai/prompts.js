@@ -38,7 +38,7 @@ Msg: "Are we meeting at the mall tomorrow by 4?"
 Sig: None.
 {"redFlags":[],"explanation":"Personal meetup message with no suspicious elements.","verdict":"safe","confidence":"high","category":"none"}
 
-Msg: "FBN: Debit NGN 2,500 Acct ****1234. Avail Bal NGN 44,320. Not you? Call 0700-FIRSTBANK."
+Msg: "Halden Bank: Debit NGN 2,500 Acct ****1234. Avail Bal NGN 44,320. Not you? Call 0700-HALDENBANK."
 Sig: None.
 {"redFlags":[],"explanation":"Standard bank debit alert with masked account, no links or requests.","verdict":"safe","confidence":"high","category":"none"}
 
