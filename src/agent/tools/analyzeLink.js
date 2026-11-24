@@ -15,6 +15,7 @@
 import {
   RISKY_TLDS, FICTIONAL_BRANDS, BRAND_RISK_WORDS, KNOWN_SHORTENERS,
 } from '../../config';
+import { checkUrl } from '../../services/safeBrowsing';
 
 // ── Function declaration for Firebase AI ──────────────────────────────────
 
@@ -73,7 +74,7 @@ function baseDomain(hostname) {
 
 // ── Main execute function ──────────────────────────────────────────────────
 
-export function execute({ url }) {
+export async function execute({ url }) {
   const hostname = parseHostname(url);
   if (!hostname) return { domain: url, riskLevel: 'low', reasons: ['Could not parse URL'] };
 
@@ -149,10 +150,18 @@ export function execute({ url }) {
     }
   }
 
+  // 9. Google Safe Browsing — definitive external check
+  const sbResult = await checkUrl(url);
+  if (!sbResult.safe && !sbResult.skipped) {
+    const threatList = sbResult.threats.join(', ');
+    reasons.unshift(`Confirmed unsafe by Google Safe Browsing (${threatList})`);
+    score += 6; // Always high-risk regardless of heuristic score
+  }
+
   const riskLevel =
     score >= 5 ? 'high' :
     score >= 3 ? 'medium' :
     score >= 1 ? 'low' : 'safe';
 
-  return { domain: hostname, riskLevel, reasons };
+  return { domain: hostname, riskLevel, reasons, safeBrowsing: sbResult };
 }

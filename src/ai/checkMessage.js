@@ -368,6 +368,56 @@ export async function preloadDeviceModel(onProgress) {
 }
 
 /**
+ * OCR an image using Gemini Nano (on-device ONLY).
+ * Returns { text, source: 'on-device' } on success.
+ * Returns { needsCloudConsent: true } when on-device is unavailable — the caller
+ * must show an explicit consent step before calling ocrImageCloud().
+ * Never silently falls back to cloud.
+ *
+ * @param {{ base64: string, mimeType: string }} imageData
+ * @returns {Promise<{ text: string, source: 'on-device' } | { needsCloudConsent: true }>}
+ */
+export async function ocrImage(imageData) {
+  const availability = await getOnDeviceAvailability();
+  if (availability !== 'available') {
+    return { needsCloudConsent: true };
+  }
+
+  const imagePart = { inlineData: { mimeType: imageData.mimeType, data: imageData.base64 } };
+  const textPart = {
+    text: 'Extract all visible text from this image exactly as it appears. ' +
+          'Return only the extracted text with no commentary, labels, or formatting.',
+  };
+  try {
+    const result = await onDeviceModel.generateContent({
+      contents: [{ role: 'user', parts: [imagePart, textPart] }],
+    });
+    return { text: result.response.text().trim(), source: 'on-device' };
+  } catch {
+    return { needsCloudConsent: true };
+  }
+}
+
+/**
+ * OCR an image using the cloud model.
+ * MUST only be called after the user has explicitly consented to uploading the image.
+ *
+ * @param {{ base64: string, mimeType: string }} imageData
+ * @returns {Promise<{ text: string, source: 'cloud' }>}
+ */
+export async function ocrImageCloud(imageData) {
+  const imagePart = { inlineData: { mimeType: imageData.mimeType, data: imageData.base64 } };
+  const textPart = {
+    text: 'Extract all visible text from this image exactly as it appears. ' +
+          'Return only the extracted text with no commentary, labels, or formatting.',
+  };
+  const result = await cloudModel.generateContent({
+    contents: [{ role: 'user', parts: [imagePart, textPart] }],
+  });
+  return { text: result.response.text().trim(), source: 'cloud' };
+}
+
+/**
  * Hybrid check: on-device Rules+AI first, then cloud second-opinion for non-safe results.
  *
  * - If on-device says 'safe' → done, nothing sent to cloud. Returns sentToCloud: false.

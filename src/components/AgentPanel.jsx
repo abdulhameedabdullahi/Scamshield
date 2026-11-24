@@ -245,6 +245,18 @@ function StepRow({ event }) {
             renderedContent={event.result.renderedContent}
           />
         )}
+        {event.tool === 'analyze_link' && event.result?.safeBrowsing && !event.result.safeBrowsing.skipped && (
+          <div style={S.sbAttribution}>
+            <a
+              href="https://safebrowsing.google.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={S.sbLink}
+            >
+              Advisory provided by Google
+            </a>
+          </div>
+        )}
       </div>
     );
   }
@@ -441,6 +453,15 @@ const S = {
     fontSize: '0.75rem',
     color: '#aaa',
     flexShrink: 0,
+  },
+  sbAttribution: {
+    width: '100%',
+    marginTop: 4,
+    fontSize: '0.75rem',
+  },
+  sbLink: {
+    color: '#888',
+    textDecoration: 'underline',
   },
   typingRow: {
     display: 'flex',

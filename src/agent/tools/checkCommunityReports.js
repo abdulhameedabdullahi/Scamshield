@@ -5,7 +5,7 @@
 //
 // Results labelled "demo data" in the UI when mock mode is active.
 
-import { queryReports, normalizeIndicator } from '../../services/reports';
+import { queryReports } from '../../services/reports';
 
 // ── Function declaration for Firebase AI ──────────────────────────────────
 
@@ -35,7 +35,5 @@ export const declaration = {
 // ── Execute ────────────────────────────────────────────────────────────────
 
 export async function execute({ indicator, kind }) {
-  const normalised = normalizeIndicator(indicator, kind);
-  const result = await queryReports(indicator, kind);
-  return { normalised, ...result };
+  return queryReports(indicator, kind);
 }

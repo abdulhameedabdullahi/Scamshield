@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /reports/{reportId} {
+      // Anyone can read reports (needed for community lookups)
+      allow read: if true;
+
+      // Only signed-in users (anonymous auth counts) can create reports.
+      // Field allow-list: no raw indicator, no message text — only the SHA-256 hash.
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+             'indicatorHash', 'kind', 'category', 'uid', 'createdAt'
+           ])
+        && request.resource.data.indicatorHash is string
+        && request.resource.data.indicatorHash.size() == 64
+        && request.resource.data.kind in ['domain', 'phone']
+        && request.resource.data.category is string
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+
+      // No updates or deletes from the client
+      allow update, delete: if false;
+    }
+  }
+}

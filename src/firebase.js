@@ -6,6 +6,7 @@ import { initializeApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { getAI, GoogleAIBackend } from 'firebase/ai';
 import { getRemoteConfig } from 'firebase/remote-config';
+import { getAuth } from 'firebase/auth';
 
 // ---------------------------------------------------------------------------
 // Firebase project config (public — safe to commit)
@@ -76,3 +77,9 @@ export const ai = getAI(app, { backend: new GoogleAIBackend() });
 export const remoteConfig = getRemoteConfig(app);
 remoteConfig.settings.minimumFetchIntervalMillis =
   import.meta.env.DEV ? 60_000 : 3_600_000;
+
+// ---------------------------------------------------------------------------
+// Anonymous Auth — used so Firestore write rules can verify request.auth != null.
+// Users are signed in automatically (no UX) when they submit a report.
+// ---------------------------------------------------------------------------
+export const auth = getAuth(app);

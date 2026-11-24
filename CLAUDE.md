@@ -582,3 +582,88 @@ remoteConfig.settings.minimumFetchIntervalMillis =
 - **`src/dev/agentTest.js`** (NEW) — analyzeLink unit tests + agent demo
 - **`README.md`** (UPDATED) — ScamShield Agent section with tools table + mermaid diagram
 - **`CLAUDE.md`** (UPDATED) — folder structure + this session block
+
+---
+
+## Decisions made in session 11 (privacy hardening)
+
+Privacy review of the 6 session-10 features found 6 issues. All fixed.
+
+### Fix 1 — SHA-256 hash community indicators
+
+**Problem:** Raw phone numbers and URLs stored in Firestore.
+**Fix:** Added `src/services/hashIndicator.js` — `hashIndicator(normalised)` and `reportDocId(uid, indHash)` using `crypto.subtle.digest('SHA-256', …)` with `COMMUNITY_INDICATOR_SALT` from `config.js`. Added `COMMUNITY_INDICATOR_SALT = 'scamshield-v1-indicator-salt-2024'` to `config.js`.
+
+Rewrote `reports.js`:
+- `queryReports` hashes on-device before `where('indicatorHash', '==', indHash)` query — raw indicator never sent.
+- `saveReport` stores only `{indicatorHash, kind, category, uid, createdAt}` — no `maskedText`, no raw indicator, no `redFlags`.
+- Deterministic doc IDs prevent duplicate reports from same user for same indicator.
+
+Updated `checkCommunityReports.js` — removed `normalizeIndicator` import; `execute` just calls `queryReports(indicator, kind)`.
+
+Rewrote `firestore.rules` — allow-list `['indicatorHash','kind','category','uid','createdAt']`; `indicatorHash.size() == 64`, `uid == request.auth.uid`, `createdAt == request.time`.
+
+Updated `App.jsx` `handleReport` — removed `maskedText` and `redFlags` from `saveReport` call.
+
+### Fix 2 — OCR consent step
+
+**Problem:** `ocrImage` auto-fell back to cloud when on-device unavailable.
+**Fix:** Split into two exports in `checkMessage.js`:
+- `ocrImage(imageData)` — on-device only; returns `{ needsCloudConsent: true }` if unavailable or if on-device fails.
+- `ocrImageCloud(imageData)` — cloud OCR; MUST be called only after explicit user consent.
+
+`App.jsx` now handles `needsCloudConsent: true` by setting `ocrState = 'needs_cloud_consent'` and showing `OcrConsentBubble` in the chat thread. User must tap "Upload and read" to call `ocrImageCloud`, or "Cancel" to dismiss. Added `ocrConsentData` state.
+
+### Fix 3 — Safe Browsing attribution
+
+`AgentPanel.jsx` `StepRow`: when `event.tool === 'analyze_link'` and `event.result.safeBrowsing && !event.result.safeBrowsing.skipped`, renders "Advisory provided by Google" link to `https://safebrowsing.google.com/` below the step result.
+
+Added `README.md` section "5. Set up Google Safe Browsing (optional)" with API key + key restriction instructions (HTTP referrers + API restriction to Safe Browsing API only).
+
+### Fix 4 — Share warning composes from signals only
+
+`handleShare` in `App.jsx` extracts `phoneSig`/`urlSig` from `result.signals` (not from raw `text`) and appends `(indicator)` to the warning. Original message text is never used.
+
+### Fix 5 — Two-stage verdict
+
+Added `buildPreliminaryVerdict(signals, ruleScore)` outside App component:
+- Returns `{ verdict, confidence, …, isPreliminary: true, source: 'rules' }` when `ruleScore >= 6` (suspicious/scam) or when strong safe cue found with no risk (safe).
+- Returns `null` otherwise → falls through to `PrelimBubble`.
+
+`handleCheck` in `App.jsx` now:
+1. Calls `analyzeSignals(trimmed)` synchronously.
+2. Calls `buildPreliminaryVerdict(signals, ruleScore)` and sets `prelimResult`.
+3. Logs `Stage A (rule engine, ~0ms)` to console.
+4. Calls `checkMessage(trimmed)` async.
+5. Logs `Stage B (AI): Xms` to console.
+6. On AI completion: clears `prelimResult`, sets `result`, `appState = 'done'`.
+
+JSX: when `appState === 'checking' && prelimResult`, shows `<VerdictCard result={prelimResult} originalText={text} />` with no action callbacks.
+
+`VerdictCard.jsx` sourceLine: when `result.isPreliminary`, shows "⚡ Instant check from rule engine — AI is confirming…" instead of cloud/on-device text. Masked text details section hidden for preliminary.
+
+Also applied `_runCheckOnExtracted(extracted)` helper used by both `handleImageCheck` and `handleOcrCloudConfirm` with the same two-stage logic.
+
+### Fix 6 — firebase.json + .firebaserc
+
+Created `firebase.json` (firestore rules + hosting config for `dist/` with SPA rewrite) and `.firebaserc` (project `scamshield-9b81e`). `firebase deploy --only firestore:rules` now works.
+
+### Privacy copy
+
+`VerdictCard.jsx` community badge: "this number's fingerprint" / "this link's fingerprint" (not raw indicator).
+`PrivacyPage.jsx`: added Step 4 "Community reports store fingerprints only" with `Users` icon; updated bottom note to mention cryptographic fingerprints.
+
+### New and updated files (session 11)
+- **`src/config.js`** (UPDATED) — added `COMMUNITY_INDICATOR_SALT`
+- **`src/services/hashIndicator.js`** (NEW) — `hashIndicator()`, `reportDocId()`
+- **`src/services/reports.js`** (REWRITTEN) — hashed indicators, no maskedText stored, deterministic doc IDs
+- **`src/agent/tools/checkCommunityReports.js`** (UPDATED) — removed normalizeIndicator; execute returns queryReports directly
+- **`firestore.rules`** (REWRITTEN) — hashed-indicator allow-list, 64-char hash check, uid match, timestamp check
+- **`src/ai/checkMessage.js`** (UPDATED) — `ocrImage` on-device only → `{needsCloudConsent}` fallback; new `ocrImageCloud` export
+- **`src/App.jsx`** (UPDATED) — two-stage verdict, OCR consent, signals-only share, stripped maskedText/redFlags from saveReport, `ocrConsentData` state, `prelimResult` state, `OcrConsentBubble` component
+- **`src/components/AgentPanel.jsx`** (UPDATED) — Safe Browsing attribution link
+- **`src/components/VerdictCard.jsx`** (UPDATED) — `isPreliminary` sourceLine; community badge fingerprint text
+- **`src/components/pages/PrivacyPage.jsx`** (UPDATED) — Step 4 + updated bottom note
+- **`firebase.json`** (NEW)
+- **`.firebaserc`** (NEW)
+- **`README.md`** (UPDATED) — Safe Browsing key restriction setup (new step 5)

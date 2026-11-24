@@ -41,6 +41,10 @@ export const PLACEHOLDER_TYPES = {
 
 export const APP_NAME = 'ScamShield';
 
+// Salt for SHA-256 hashing of community report indicators.
+// Changing this invalidates all existing hashed records — do NOT change after deploy.
+export const COMMUNITY_INDICATOR_SALT = 'scamshield-v1-indicator-salt-2024';
+
 // ── Agent configuration ────────────────────────────────────────────────────
 
 // TLDs frequently used in scam/phishing domains.
@@ -76,7 +80,7 @@ export const SCAM_TRENDS_DEFAULT =
 
 // Set true to return deterministic demo data from check_community_reports
 // instead of querying Firestore. Switch to false once Firestore rules are deployed.
-export const USE_MOCK_REPORTS = true;
+export const USE_MOCK_REPORTS = false;
 
 // Maximum tool-call steps in one agent run before forcing the final answer.
 export const AGENT_MAX_STEPS = 6;

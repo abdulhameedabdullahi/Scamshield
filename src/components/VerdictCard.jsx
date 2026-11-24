@@ -5,6 +5,9 @@
 //   result        — from checkMessage/onDeviceCheck/cloudCheck
 //   originalText  — raw message (for inline highlights)
 //   onInvestigate — callback for "Dig deeper online" button (optional)
+//   onReport      — callback for "Report this scam" button (optional)
+//   onShare       — callback for "Warn your contacts" button (optional)
+//   communityData — { count, lastReportedAt, topCategories, indicatorKind } (optional)
 
 import { REPORTING_TIPS, ADVICE_BY_CATEGORY } from '../config';
 import HighlightedMessage from './HighlightedMessage';
@@ -50,7 +53,7 @@ const CATEGORY_LABELS = {
   other:                    'Other suspicious message',
 };
 
-export default function VerdictCard({ result, originalText, onInvestigate }) {
+export default function VerdictCard({ result, originalText, onInvestigate, onReport, onShare, communityData }) {
   const cfg = VERDICT_CFG[result.verdict] ?? VERDICT_CFG.suspicious;
   const isSafe = result.verdict === 'safe';
   const isCloud = result.source === 'cloud';
@@ -116,29 +119,51 @@ export default function VerdictCard({ result, originalText, onInvestigate }) {
         </ul>
       </div>
 
-      {/* Dig deeper button */}
-      {onInvestigate && (
-        <button
-          className="btn-deeper"
-          onClick={onInvestigate}
-          type="button"
-        >
-          Dig deeper online
-        </button>
+      {/* Community reports badge */}
+      {communityData && communityData.count > 0 && (
+        <div style={S.communityBadge} role="status">
+          <span style={S.communityIcon}>👥</span>
+          <span>
+            <strong>{communityData.count}</strong> ScamShield user{communityData.count === 1 ? '' : 's'} already
+            reported {communityData.indicatorKind === 'phone' ? 'this number\'s fingerprint' : 'this link\'s fingerprint'} as a scam
+            {communityData.lastReportedAt ? ` · last seen ${communityData.lastReportedAt}` : ''}.
+          </span>
+        </div>
       )}
+
+      {/* Action buttons row */}
+      <div style={S.actionRow}>
+        {onInvestigate && (
+          <button className="btn-deeper" onClick={onInvestigate} type="button">
+            Dig deeper online
+          </button>
+        )}
+        {!isSafe && onShare && (
+          <button className="btn-share-warn" onClick={onShare} type="button">
+            Warn your contacts
+          </button>
+        )}
+        {!isSafe && onReport && (
+          <button className="btn-report-scam" onClick={onReport} type="button">
+            Report this scam
+          </button>
+        )}
+      </div>
 
       {/* Privacy / source badge */}
       <div style={S.sourceLine}>
-        {isCloud
-          ? '☁️ Checked online. Personal details were hidden before sending.'
-          : '🔒 Checked on this phone. Nothing was uploaded.'}
-        {result.durationMs != null && (
+        {result.isPreliminary
+          ? '⚡ Instant check from rule engine — AI is confirming…'
+          : isCloud
+            ? '☁️ Checked online. Personal details were hidden before sending.'
+            : '🔒 Checked on this phone. Nothing was uploaded.'}
+        {result.durationMs != null && !result.isPreliminary && (
           <span style={S.timing}> · {(result.durationMs / 1000).toFixed(1)}s</span>
         )}
       </div>
 
       {/* Masked text for cloud results */}
-      {isCloud && result.maskedText && (
+      {isCloud && result.maskedText && !result.isPreliminary && (
         <details style={S.maskedDetails}>
           <summary style={S.maskedSummary}>View what was sent online</summary>
           <pre style={S.maskedPre}>{result.maskedText}</pre>
@@ -253,5 +278,29 @@ const S = {
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
     fontFamily: 'var(--font-mono)',
+  },
+  communityBadge: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: '10px 12px',
+    background: 'rgba(255,255,255,0.55)',
+    borderRadius: 10,
+    fontSize: '0.875rem',
+    lineHeight: 1.5,
+    marginBottom: 12,
+    color: '#7f1d1d',
+    border: '1px solid #FECACA',
+  },
+  communityIcon: {
+    flexShrink: 0,
+    fontSize: '1rem',
+    marginTop: 1,
+  },
+  actionRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
   },
 };

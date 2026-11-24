@@ -420,6 +420,40 @@ button {
   box-shadow: none;
 }
 
+.btn-share-warn {
+  flex: 1;
+  padding: 10px 14px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-family: var(--font-body);
+  background: #1E7346;
+  color: #fff;
+  border: none;
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  min-height: 44px;
+  transition: background 0.15s, transform 0.1s;
+}
+.btn-share-warn:hover { background: #165c38; }
+.btn-share-warn:active { transform: scale(0.97); }
+
+.btn-report-scam {
+  flex: 1;
+  padding: 10px 14px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  background: transparent;
+  color: var(--scam);
+  border: 1.5px solid #FECACA;
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  min-height: 44px;
+  transition: background 0.15s, transform 0.1s;
+}
+.btn-report-scam:hover { background: #fff0f0; }
+.btn-report-scam:active { transform: scale(0.97); }
+
 .btn-ghost {
   padding: 8px 14px;
   font-size: 0.875rem;

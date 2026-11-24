@@ -227,7 +227,20 @@ npm install
 4. In the Firebase console, go to **App Check → Apps → Register** and choose
    **reCAPTCHA Enterprise**. Paste the site key there.
 
-### 5. Configure environment variables
+### 5. Set up Google Safe Browsing (optional)
+
+The `analyze_link` agent tool can query the **Google Safe Browsing v4 Lookup API** to flag
+confirmed malicious URLs. It is optional — if the key is absent the tool falls back to
+local heuristics only.
+
+1. Go to [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials).
+2. Click **Create credentials → API key**.
+3. Click **Edit key** (pencil icon) to restrict it:
+   - **Application restrictions**: HTTP referrers → add your production domain (e.g. `https://scamshield.web.app/*`) and `http://localhost:5173/*` for local dev.
+   - **API restrictions**: Restrict to → select **Safe Browsing API** only.
+4. Copy the key.
+
+### 6. Configure environment variables
 
 ```bash
 cp .env.example .env.local
@@ -237,7 +250,8 @@ Edit `.env.local`:
 
 ```env
 VITE_RECAPTCHA_SITE_KEY=your-recaptcha-enterprise-site-key-here
-VITE_FIREBASE_APPCHECK_DEBUG_TOKEN=   # leave blank for now — see step 6
+VITE_FIREBASE_APPCHECK_DEBUG_TOKEN=   # leave blank for now — see step 7
+VITE_SAFE_BROWSING_API_KEY=your-safe-browsing-api-key-here   # optional
 ```
 
 ### 6. Start the dev server

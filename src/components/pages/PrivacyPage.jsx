@@ -1,6 +1,6 @@
 // PrivacyPage — plain-language 3-step privacy explainer
 
-import { Lock, Smartphone, Search } from 'lucide-react';
+import { Lock, Smartphone, Search, Users } from 'lucide-react';
 
 export default function PrivacyPage() {
   return (
@@ -32,11 +32,19 @@ export default function PrivacyPage() {
             title="Only searched online if you ask"
             body="After you review the hidden version and tap 'Search online', only that masked text is sent — never the original message. You can also cancel at any point."
           />
+          <div style={S.connector} aria-hidden="true" />
+          <Step
+            icon={<Users size={28} color="var(--plum-700)" strokeWidth={1.75} />}
+            number="4"
+            title="Community reports store fingerprints only"
+            body="When you report a scam, only a one-way cryptographic fingerprint (SHA-256 hash) of the scammer's phone number or link is stored — never the number or link itself. No one, including ScamShield, can reverse a fingerprint back to the original. Your report helps protect others without exposing any real contact details."
+          />
         </div>
 
         <div style={S.note}>
           <strong>No account needed.</strong> ScamShield does not store your messages,
           create a profile, or share anything with third parties.
+          Community scam reports store only cryptographic fingerprints of scammer identifiers — no raw phone numbers or links are ever written to the database.
           The optional ScamShield Agent searches the web on your behalf using the masked text only.
         </div>
       </div>

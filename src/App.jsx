@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { getOnDeviceAvailability } from './ai/availability';
 import {
   checkMessage, downloadAndCheck, cloudCheck,
-  preloadDeviceModel, warmUpDeviceModel,
+  preloadDeviceModel, warmUpDeviceModel, ocrImage, ocrImageCloud,
 } from './ai/checkMessage';
 import { analyzeSignals } from './ai/rules';
 import { detectEntities } from './ai/maskMessage';
+import { queryReports, saveReport } from './services/reports';
 import Logo from './components/Logo';
 import ModelStatus from './components/ModelStatus';
 import MessageInput from './components/MessageInput';
@@ -19,6 +20,59 @@ import Dashboard from './components/dashboard/Dashboard';
 import PrivacyPage from './components/pages/PrivacyPage';
 import AboutPage from './components/pages/AboutPage';
 import { Menu, X } from 'lucide-react';
+// Category labels used for the share warning message
+const CATEGORY_LABELS = {
+  fake_bank_alert:          'fake bank alert',
+  account_block_or_bvn_nin: 'BVN/NIN account block scam',
+  otp_pin_request:          'OTP/PIN theft attempt',
+  job_or_loan_upfront_fee:  'fake job or loan scam',
+  prize_or_lottery:         'fake prize or lottery',
+  impersonation:            'impersonation scam',
+  investment_scheme:        'investment scheme scam',
+  wrong_transfer_refund:    'wrong transfer refund scam',
+  romance:                  'romance scam',
+  phishing_link:            'phishing link',
+  other:                    'suspicious scam message',
+};
+
+// ── Preliminary verdict (Stage A: rule engine, synchronous) ───────────────
+// Returns a VerdictCard-compatible result object when the rule engine has
+// enough signal to show an instant card, or null to fall through to PrelimBubble.
+
+function buildPreliminaryVerdict(signals, ruleScore) {
+  const hasStrongSafe = signals.some((s) => s.id === 'do_not_share' || s.id === 'standard_alert');
+  const positiveSignals = signals.filter((s) => s.weight > 0);
+
+  // Strong safe signal with no risk → safe preliminary
+  if (hasStrongSafe && positiveSignals.length === 0) {
+    return {
+      verdict: 'safe', confidence: 'low', category: 'none', redFlags: [],
+      explanation: 'Rule engine found strong safe signals.',
+      isPreliminary: true, source: 'rules', signals,
+    };
+  }
+
+  // High rule score → suspicious or scam preliminary
+  if (ruleScore >= 6) {
+    const ruleFlags = positiveSignals
+      .filter((s) => s.start >= 0 && s.phrase)
+      .slice(0, 3)
+      .map((s) => ({ phrase: s.phrase, reason: s.label, source: 'rule', start: s.start, end: s.end }));
+    return {
+      verdict: ruleScore >= 10 ? 'scam' : 'suspicious',
+      confidence: 'low',
+      category: 'other',
+      redFlags: ruleFlags,
+      explanation: 'Rule engine detected strong risk signals.',
+      isPreliminary: true,
+      source: 'rules',
+      signals,
+      needsSecondOpinion: false,
+    };
+  }
+
+  return null;
+}
 
 // ── Routing ────────────────────────────────────────────────────────────────
 
@@ -67,7 +121,17 @@ export default function App() {
   // ── Check page state ──────────────────────────────────────────────────────
 
   const [appState, setAppState]             = useState('idle');
-  const [text, setText]                     = useState('');
+  // Lazy initializer reads Web Share Target params (?text=, ?url=, ?title=) on first render.
+  const [text, setText]                     = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const shared = [params.get('text'), params.get('url'), params.get('title')]
+      .filter(Boolean).join(' ').trim();
+    if (shared) {
+      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+      return shared;
+    }
+    return '';
+  });
   const [result, setResult]                 = useState(null);
   const [errorMsg, setErrorMsg]             = useState('');
   const [availability, setAvailability]     = useState(null);
@@ -75,6 +139,14 @@ export default function App() {
   const [devOpen, setDevOpen]               = useState(false);
   const [checkStartTime, setCheckStartTime] = useState(null);
   const [maskData, setMaskData]             = useState(null);
+
+  // Image OCR state
+  const [imageData, setImageData]           = useState(null); // { base64, mimeType, preview }
+  const [ocrState, setOcrState]             = useState('idle'); // 'idle' | 'reading'
+
+  // Community report state
+  const [communityData, setCommunityData]   = useState(null);
+  const [reportState, setReportState]       = useState('idle'); // 'idle' | 'saving' | 'done'
 
   // Agent state
   const [investigateState, setInvestigateState]     = useState('idle');
@@ -84,6 +156,10 @@ export default function App() {
 
   // Instant rule preview
   const [preliminarySignals, setPreliminarySignals] = useState(null);
+  // Stage A preliminary verdict card (shown while AI is still running)
+  const [prelimResult, setPrelimResult] = useState(null);
+  // OCR consent: set when on-device OCR unavailable, cleared by confirm/cancel
+  const [ocrConsentData, setOcrConsentData] = useState(null);
 
   // Scroll
   const bottomRef = useRef(null);
@@ -123,41 +199,231 @@ export default function App() {
     setInvestigateMaskedText(null);
     setInvestigateVerdict(null);
     setPreliminarySignals(null);
+    setPrelimResult(null);
+    setOcrConsentData(null);
+    setCommunityData(null); setReportState('idle');
   }
 
   function handleClear() {
     setText(''); setAppState('idle'); setResult(null); setErrorMsg('');
     setMaskData(null); setInvestigateState('idle'); setInvestigateMaskData(null);
     setInvestigateMaskedText(null); setInvestigateVerdict(null);
-    setPreliminarySignals(null);
+    setPreliminarySignals(null); setPrelimResult(null);
+    setImageData(null); setOcrState('idle'); setOcrConsentData(null);
+    setCommunityData(null); setReportState('idle');
   }
 
-  async function handleCheck() {
-    if (!text.trim()) return;
-    const instant = analyzeSignals(text.trim());
-    setAppState('checking'); setResult(null); setErrorMsg(''); setMaskData(null);
+  // ── Image handling ──────────────────────────────────────────────────────
+
+  function handleImageFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target.result.split(',')[1];
+      const mimeType = file.type || 'image/png';
+      setImageData({ base64, mimeType, preview: e.target.result });
+      setCommunityData(null); setReportState('idle');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleImageCheck() {
+    if (!imageData) return;
+    setOcrState('reading');
+    setAppState('checking'); setResult(null); setErrorMsg('');
     setInvestigateState('idle'); setInvestigateMaskData(null);
     setInvestigateMaskedText(null); setInvestigateVerdict(null);
-    setPreliminarySignals(instant);
-    startProgress();
+    setPreliminarySignals(null); setPrelimResult(null);
+    setCommunityData(null); setReportState('idle');
     try {
-      const outcome = await checkMessage(text, () => {});
+      const ocrResult = await ocrImage(imageData);
+      if (ocrResult.needsCloudConsent) {
+        setOcrState('needs_cloud_consent');
+        setOcrConsentData({ imageData });
+        setAppState('idle');
+        return;
+      }
+      const extracted = ocrResult.text;
+      setText(extracted);
+      setOcrState('idle');
+      await _runCheckOnExtracted(extracted);
+    } catch (err) {
+      setOcrState('idle');
+      setErrorMsg(err?.message ?? 'Could not read the image. Please try again.');
+      setAppState('error');
+    }
+  }
+
+  async function handleOcrCloudConfirm() {
+    if (!ocrConsentData) return;
+    const { imageData: imgData } = ocrConsentData;
+    setOcrConsentData(null);
+    setOcrState('reading_cloud');
+    setAppState('checking'); setResult(null); setErrorMsg('');
+    try {
+      const { text: extracted } = await ocrImageCloud(imgData);
+      setText(extracted);
+      setOcrState('idle');
+      await _runCheckOnExtracted(extracted);
+    } catch (err) {
+      setOcrState('idle');
+      setErrorMsg(err?.message ?? 'Could not read the image. Please try again.');
+      setAppState('error');
+    }
+  }
+
+  function handleOcrCloudCancel() {
+    setOcrConsentData(null);
+    setOcrState('idle');
+    setAppState('idle');
+  }
+
+  async function _runCheckOnExtracted(extracted) {
+    const { signals, ruleScore } = analyzeSignals(extracted);
+    setPreliminarySignals({ signals, ruleScore });
+    const prelim = buildPreliminaryVerdict(signals, ruleScore);
+    setPrelimResult(prelim);
+    if (prelim) console.log(`[ScamShield] Stage A (rule engine, ~0ms): ${prelim.verdict}`);
+    const stageATime = Date.now();
+    setAppState('checking'); startProgress();
+    try {
+      const outcome = await checkMessage(extracted, () => {});
       stopProgress();
+      console.log(`[ScamShield] Stage B (AI): ${Date.now() - stageATime}ms → ${outcome.state ?? outcome.verdict}`);
       if (outcome.state === 'needs_download') {
         setAvailability(outcome.availability); setAppState('needs_download');
       } else if (outcome.state === 'needs_consent') {
         setAvailability(outcome.availability); setAppState('masking');
         try {
-          const md = await detectEntities(text);
+          const md = await detectEntities(extracted);
           setMaskData(md); setAppState('send_preview');
         } catch (err) {
           setErrorMsg(err?.message ?? 'Couldn\'t prepare message. Please try again.');
           setAppState('error');
         }
       } else {
+        setPrelimResult(null);
         setResult(outcome);
         if (outcome.source === 'on-device') setAvailability('available');
         setAppState('done');
+        fetchCommunityData(outcome);
+      }
+    } catch (err) {
+      stopProgress();
+      setErrorMsg(err?.message ?? 'Something went wrong. Please try again.');
+      setAppState('error');
+    }
+  }
+
+  // ── Community lookup (runs silently after check completes) ──────────────
+
+  async function fetchCommunityData(outcome) {
+    try {
+      const signals = outcome.signals ?? [];
+      const phoneSig = signals.find((s) => s.id === 'phone_number' && s.phrase);
+      const urlSig   = signals.find((s) => s.id === 'link' && s.phrase);
+      if (!phoneSig && !urlSig) return;
+
+      const indicator     = phoneSig?.phrase ?? urlSig?.phrase;
+      const kind          = phoneSig ? 'phone' : 'domain';
+      const data          = await queryReports(indicator, kind);
+      if (data.count > 0) {
+        setCommunityData({ ...data, indicatorKind: kind, indicator });
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  // ── Report a confirmed scam ─────────────────────────────────────────────
+
+  async function handleReport() {
+    if (!result || reportState !== 'idle') return;
+    setReportState('saving');
+    try {
+      const signals    = result.signals ?? [];
+      const phoneSig   = signals.find((s) => s.id === 'phone_number' && s.phrase);
+      const urlSig     = signals.find((s) => s.id === 'link' && s.phrase);
+      const indicator  = phoneSig?.phrase ?? urlSig?.phrase ?? null;
+      const indicatorKind = phoneSig ? 'phone' : urlSig ? 'domain' : null;
+
+      await saveReport({
+        verdict:      result.verdict,
+        category:     result.category,
+        indicator,
+        indicatorKind,
+      });
+      setReportState('done');
+    } catch (err) {
+      console.error('[ScamShield] Report failed:', err?.message);
+      setReportState('idle');
+    }
+  }
+
+  // ── Share warning to contacts ───────────────────────────────────────────
+
+  async function handleShare() {
+    if (!result) return;
+    const catLabel = CATEGORY_LABELS[result.category] ?? 'suspicious message';
+    // Scammer identifier is sourced from result.signals only — never from raw message text.
+    const signals = result.signals ?? [];
+    const phoneSig = signals.find((s) => s.id === 'phone_number' && s.phrase);
+    const urlSig   = signals.find((s) => s.id === 'link' && s.phrase);
+    const indicator = phoneSig?.phrase ?? urlSig?.phrase ?? null;
+    const indicatorNote = indicator ? ` (${indicator})` : '';
+    const shareText =
+      `⚠️ ScamShield Warning: I checked a message and it was flagged as a ${catLabel}${indicatorNote}.\n\n` +
+      `Stay safe — don't reply, click links, or send money if you receive it.\n\n` +
+      `🛡️ Check any message free at: https://scamshield.web.app`;
+
+    if (navigator.share) {
+      try { await navigator.share({ text: shareText }); } catch { /* user cancelled */ }
+    } else {
+      try {
+        await navigator.clipboard.writeText(shareText);
+        alert('Warning message copied to clipboard — paste it into WhatsApp to warn your contacts.');
+      } catch { /* clipboard not available */ }
+    }
+  }
+
+  async function handleCheck() {
+    // If an image is loaded and no text, run image check instead
+    if (imageData && !text.trim()) return handleImageCheck();
+    if (!text.trim()) return;
+    const trimmed = text.trim();
+    setResult(null); setErrorMsg(''); setMaskData(null);
+    setInvestigateState('idle'); setInvestigateMaskData(null);
+    setInvestigateMaskedText(null); setInvestigateVerdict(null);
+    setCommunityData(null); setReportState('idle');
+
+    // Stage A: synchronous rule engine — build preliminary verdict instantly
+    const { signals, ruleScore } = analyzeSignals(trimmed);
+    setPreliminarySignals({ signals, ruleScore });
+    const prelim = buildPreliminaryVerdict(signals, ruleScore);
+    setPrelimResult(prelim);
+    if (prelim) console.log(`[ScamShield] Stage A (rule engine, ~0ms): ${prelim.verdict}`);
+    const stageATime = Date.now();
+
+    setAppState('checking');
+    startProgress();
+    try {
+      const outcome = await checkMessage(trimmed, () => {});
+      stopProgress();
+      console.log(`[ScamShield] Stage B (AI): ${Date.now() - stageATime}ms → ${outcome.state ?? outcome.verdict}`);
+      if (outcome.state === 'needs_download') {
+        setAvailability(outcome.availability); setAppState('needs_download');
+      } else if (outcome.state === 'needs_consent') {
+        setAvailability(outcome.availability); setAppState('masking');
+        try {
+          const md = await detectEntities(trimmed);
+          setMaskData(md); setAppState('send_preview');
+        } catch (err) {
+          setErrorMsg(err?.message ?? 'Couldn\'t prepare message. Please try again.');
+          setAppState('error');
+        }
+      } else {
+        setPrelimResult(null);
+        setResult(outcome);
+        if (outcome.source === 'on-device') setAvailability('available');
+        setAppState('done');
+        fetchCommunityData(outcome);
       }
     } catch (err) {
       stopProgress();
@@ -196,6 +462,7 @@ export default function App() {
     try {
       const outcome = await cloudCheck(text, () => {}, maskedText);
       stopProgress(); setResult(outcome); setAppState('done');
+      fetchCommunityData(outcome);
     } catch (err) {
       stopProgress();
       setErrorMsg(err?.message ?? 'Couldn\'t check online. Check your internet and try again.');
@@ -396,13 +663,32 @@ export default function App() {
                 </div>
               )}
 
-              {/* ── Preliminary signals while checking ── */}
-              {uniqueSignals.length > 0 && appState === 'checking' && (
+              {/* ── OCR cloud consent ── */}
+              {ocrState === 'needs_cloud_consent' && (
+                <OcrConsentBubble
+                  onConfirm={handleOcrCloudConfirm}
+                  onCancel={handleOcrCloudCancel}
+                />
+              )}
+
+              {/* ── Preliminary signals while checking (no strong rule verdict) ── */}
+              {uniqueSignals.length > 0 && appState === 'checking' && !prelimResult && (
                 <PrelimBubble signals={uniqueSignals} />
               )}
 
+              {/* ── Stage A: preliminary VerdictCard (rule engine instant result) ── */}
+              {appState === 'checking' && prelimResult && (
+                <VerdictCard result={prelimResult} originalText={text} />
+              )}
+
               {/* ── Typing indicator ── */}
-              {appState === 'checking' && (
+              {ocrState === 'reading' && (
+                <TypingBubble label="Reading text from your screenshot on this phone…" />
+              )}
+              {ocrState === 'reading_cloud' && (
+                <TypingBubble label="Uploading screenshot to read its text…" />
+              )}
+              {appState === 'checking' && ocrState !== 'reading' && ocrState !== 'reading_cloud' && (
                 <TypingBubble label={checkingLabel} />
               )}
               {appState === 'masking' && (
@@ -444,12 +730,20 @@ export default function App() {
                 <VerdictCard
                   result={result}
                   originalText={text}
+                  communityData={communityData}
                   onInvestigate={
                     investigateState === 'idle'
                       ? () => handleInvestigateRequest(result)
                       : undefined
                   }
+                  onShare={handleShare}
+                  onReport={reportState === 'idle' ? handleReport : undefined}
                 />
+              )}
+              {appState === 'done' && reportState === 'done' && (
+                <div style={S.reportedBadge} className="bubble-enter" role="status">
+                  ✓ Reported — thank you for helping protect the community.
+                </div>
               )}
 
               {/* ── Agent: send preview ── */}
@@ -513,7 +807,10 @@ export default function App() {
                 onChange={handleTextChange}
                 onCheck={handleCheck}
                 onClear={handleClear}
-                disabled={isChecking || isDownloading}
+                disabled={isChecking || isDownloading || ocrState === 'reading'}
+                onImageFile={handleImageFile}
+                imagePreview={imageData?.preview ?? null}
+                onClearImage={() => { setImageData(null); setOcrState('idle'); }}
               />
             </div>
           </div>
@@ -560,6 +857,27 @@ function PrelimBubble({ signals }) {
         </ul>
       )}
       <div style={S.prelimFooter}>AI review in progress…</div>
+    </div>
+  );
+}
+
+function OcrConsentBubble({ onConfirm, onCancel }) {
+  return (
+    <div style={S.ocrConsentBubble} className="bubble-enter" role="dialog" aria-label="Upload screenshot for text reading">
+      <strong style={S.ocrConsentTitle}>Reading this screenshot requires cloud processing.</strong>
+      <p style={S.ocrConsentBody}>
+        On-device text reading is unavailable on this device. To extract the text,
+        the screenshot must be uploaded. It will not be stored. No personal details
+        from the screenshot are retained by this step.
+      </p>
+      <div style={S.ocrConsentActions}>
+        <button className="btn-deeper" onClick={onConfirm} type="button">
+          Upload and read
+        </button>
+        <button className="btn-ghost" onClick={onCancel} type="button">
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -705,6 +1023,33 @@ const S = {
     whiteSpace: 'pre-wrap',
   },
 
+  /* OCR consent */
+  ocrConsentBubble: {
+    padding: '16px 18px',
+    background: 'var(--plum-100)',
+    border: '1px solid var(--line)',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: '90%',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+  },
+  ocrConsentTitle: {
+    fontSize: '0.9375rem',
+    color: 'var(--plum-900)',
+  },
+  ocrConsentBody: {
+    fontSize: '0.9rem',
+    color: '#555',
+    lineHeight: 1.5,
+    margin: 0,
+  },
+  ocrConsentActions: {
+    display: 'flex',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+
   /* Preliminary signals */
   prelimBubble: {
     padding: '12px 16px',
@@ -790,6 +1135,18 @@ const S = {
     borderRadius: 'var(--r-bubble-in)',
     fontSize: '0.9375rem',
     color: 'var(--scam)',
+    maxWidth: '90%',
+    lineHeight: 1.5,
+  },
+
+  /* Reported badge */
+  reportedBadge: {
+    padding: '10px 14px',
+    background: 'var(--safe-bg)',
+    border: '1px solid #A7F3D0',
+    borderRadius: 'var(--r-bubble-in)',
+    fontSize: '0.9375rem',
+    color: 'var(--safe)',
     maxWidth: '90%',
     lineHeight: 1.5,
   },

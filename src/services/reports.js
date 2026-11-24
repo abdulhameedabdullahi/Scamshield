@@ -1,15 +1,22 @@
-// Community reports service: query anonymous masked scam reports from Firestore.
+// Community reports service: query and save anonymous scam reports in Firestore.
 //
-// Security: reports collection stores only masked text + verdict + indicator.
-// No PII is ever written here. The placeholderMap stays on-device.
+// Privacy model:
+//   - Raw phone numbers and URLs are NEVER stored in Firestore.
+//   - Each indicator is normalised then SHA-256-hashed on-device before any network call.
+//   - Saved documents contain only: indicatorHash, kind, category, uid, createdAt.
+//   - Document IDs are deterministic: SHA-256(uid + ':' + indicatorHash), preventing duplicates.
 //
 // USE_MOCK_REPORTS (config.js): when true, returns deterministic demo data so
-// the agent tool works before Firestore rules are deployed. The UI always
-// labels mock results as "demo data".
+// the agent tool works before Firestore rules are deployed.
 
-import { getFirestore, collection, query, where, orderBy, limit, getDocs, addDoc, Timestamp } from 'firebase/firestore';
-import { app } from '../firebase';
+import {
+  getFirestore, collection, query, where, orderBy, limit, getDocs,
+  setDoc, doc, Timestamp,
+} from 'firebase/firestore';
+import { signInAnonymously } from 'firebase/auth';
+import { app, auth } from '../firebase';
 import { USE_MOCK_REPORTS } from '../config';
+import { hashIndicator, reportDocId } from './hashIndicator';
 
 let _db = null;
 function db() {
@@ -17,9 +24,17 @@ function db() {
   return _db;
 }
 
+// ── Anonymous auth ─────────────────────────────────────────────────────────
+
+async function ensureAuth() {
+  if (!auth.currentUser) {
+    await signInAnonymously(auth);
+  }
+}
+
 // ── Normalisation ──────────────────────────────────────────────────────────
 
-export function normalizeIndicator(indicator, kind) {
+function normalizeIndicator(indicator, kind) {
   if (kind === 'domain') {
     return indicator.toLowerCase().replace(/^www\./, '').split('/')[0];
   }
@@ -32,7 +47,7 @@ export function normalizeIndicator(indicator, kind) {
   return indicator.toLowerCase();
 }
 
-// ── Mock data (deterministic from indicator hash) ──────────────────────────
+// ── Mock data (deterministic from indicator string) ────────────────────────
 
 function simpleHash(s) {
   let h = 2166136261; // FNV-1a offset
@@ -48,15 +63,12 @@ const MOCK_CATEGORIES = [
   'otp_pin_request', 'investment_scheme', 'impersonation',
 ];
 
-function getMockReports(indicator) {
-  const h = simpleHash(indicator);
-  // Known-scam indicators always return high counts.
+function getMockReports(normalised) {
+  const h = simpleHash(normalised);
   const isKnownScam =
-    indicator.includes('verify') ||
-    indicator.includes('scam') ||
-    indicator.includes('phish') ||
-    indicator.includes('reward') ||
-    indicator.includes('prize');
+    normalised.includes('verify') || normalised.includes('scam') ||
+    normalised.includes('phish') || normalised.includes('reward') ||
+    normalised.includes('prize');
 
   const count = isKnownScam ? 20 + (h % 80) : h % 8;
   if (count === 0) return { count: 0, lastReportedAt: null, topCategories: [], demo: true };
@@ -65,7 +77,6 @@ function getMockReports(indicator) {
   const topCategories = [MOCK_CATEGORIES[catIdx]];
   if (count > 10) topCategories.push(MOCK_CATEGORIES[(catIdx + 1) % MOCK_CATEGORIES.length]);
 
-  // Deterministic date in the last 30 days
   const daysAgo = h % 30;
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
@@ -78,6 +89,7 @@ function getMockReports(indicator) {
 
 /**
  * Query reports for a domain or phone indicator.
+ * Hashes the indicator on-device before querying — the raw value never leaves the browser.
  * Returns { count, lastReportedAt, topCategories, demo? }
  */
 export async function queryReports(indicator, kind) {
@@ -88,9 +100,12 @@ export async function queryReports(indicator, kind) {
   }
 
   try {
+    const indHash = await hashIndicator(normalised);
+
     const q = query(
       collection(db(), 'reports'),
-      where('indicator', '==', normalised),
+      where('indicatorHash', '==', indHash),
+      where('kind', '==', kind),
       orderBy('createdAt', 'desc'),
       limit(100),
     );
@@ -100,12 +115,11 @@ export async function queryReports(indicator, kind) {
 
     const categories = {};
     let lastTs = null;
-    snap.forEach((doc) => {
-      const d = doc.data();
-      if (d.category) categories[d.category] = (categories[d.category] ?? 0) + 1;
-      if (!lastTs || (d.createdAt?.toMillis?.() ?? 0) > lastTs) {
-        lastTs = d.createdAt?.toMillis?.() ?? 0;
-      }
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data.category) categories[data.category] = (categories[data.category] ?? 0) + 1;
+      const ts = data.createdAt?.toMillis?.() ?? 0;
+      if (!lastTs || ts > lastTs) lastTs = ts;
     });
 
     const topCategories = Object.entries(categories)
@@ -125,19 +139,29 @@ export async function queryReports(indicator, kind) {
 }
 
 /**
- * Save an anonymous masked scam report.
- * @param {{ maskedText, verdict, category, redFlags, indicator?, indicatorKind? }} report
+ * Save an anonymous scam report.
+ * Stores only { indicatorHash, kind, category, uid, createdAt } — no raw indicator, no message text.
+ * Uses a deterministic doc ID to prevent duplicate reports from the same user for the same indicator.
+ *
+ * @param {{ verdict: string, category: string, indicator?: string, indicatorKind?: string }} report
  */
 export async function saveReport(report) {
   if (USE_MOCK_REPORTS) return 'mock-report-id';
-  const ref = await addDoc(collection(db(), 'reports'), {
-    maskedText: report.maskedText,
-    verdict: report.verdict,
+  if (!report.indicator || !report.indicatorKind) return null;
+
+  await ensureAuth();
+  const uid = auth.currentUser.uid;
+  const normalised = normalizeIndicator(report.indicator, report.indicatorKind);
+  const indHash = await hashIndicator(normalised);
+  const docId = await reportDocId(uid, indHash);
+
+  await setDoc(doc(db(), 'reports', docId), {
+    indicatorHash: indHash,
+    kind: report.indicatorKind,
     category: report.category ?? 'other',
-    redFlags: (report.redFlags ?? []).map((f) => f.phrase ?? f).slice(0, 5),
-    indicator: report.indicator ?? null,
-    indicatorKind: report.indicatorKind ?? null,
+    uid,
     createdAt: Timestamp.now(),
   });
-  return ref.id;
+
+  return docId;
 }
