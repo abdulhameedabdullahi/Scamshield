@@ -21,6 +21,7 @@ import PrivacyPage from './components/pages/PrivacyPage';
 import AboutPage from './components/pages/AboutPage';
 import { Menu, X } from 'lucide-react';
 import { isOverDailyLimit, incrementDailyCount } from './services/dailyQuota';
+import { APP_URL } from './config';
 // Category labels used for the share warning message
 const CATEGORY_LABELS = {
   fake_bank_alert:          'fake bank alert',
@@ -388,7 +389,7 @@ export default function App() {
     const shareText =
       `⚠️ ScamShield Warning: I checked a message and it was flagged as a ${catLabel}${indicatorNote}.\n\n` +
       `Stay safe — don't reply, click links, or send money if you receive it.\n\n` +
-      `🛡️ Check any message free at: https://scamshield.web.app`;
+      `🛡️ Check any message free at: ${APP_URL}`;
 
     if (navigator.share) {
       try { await navigator.share({ text: shareText }); } catch { /* user cancelled */ }

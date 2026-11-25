@@ -40,6 +40,7 @@ export const PLACEHOLDER_TYPES = {
 };
 
 export const APP_NAME = 'ScamShield';
+export const APP_URL = 'https://scamshield-9b81e.web.app/';
 
 // Salt for SHA-256 hashing of community report indicators.
 // Changing this invalidates all existing hashed records — do NOT change after deploy.
