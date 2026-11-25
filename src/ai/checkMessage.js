@@ -24,7 +24,7 @@
 //   needsSecondOpinion = verdict !== 'safe'
 
 import { onDeviceModel, cloudModel } from './models';
-import { getOnDeviceAvailability, initDeviceModel } from './availability';
+import { getOnDeviceAvailability, getOcrOnDeviceAvailability, initDeviceModel } from './availability';
 import { buildScamCheckPrompt } from './prompts';
 import { SCAM_CHECK_GENERATION_CONFIG } from './schemas';
 import { regexMask } from './regexMask';
@@ -378,7 +378,7 @@ export async function preloadDeviceModel(onProgress) {
  * @returns {Promise<{ text: string, source: 'on-device' } | { needsCloudConsent: true }>}
  */
 export async function ocrImage(imageData) {
-  const availability = await getOnDeviceAvailability();
+  const availability = await getOcrOnDeviceAvailability();
   if (availability !== 'available') {
     return { needsCloudConsent: true };
   }

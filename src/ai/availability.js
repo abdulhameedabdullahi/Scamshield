@@ -30,6 +30,27 @@ export async function getOnDeviceAvailability() {
 }
 
 /**
+ * Check on-device availability specifically for image input.
+ * Logs the result so we can diagnose why OCR falls back to cloud.
+ */
+export async function getOcrOnDeviceAvailability() {
+  if (typeof window.LanguageModel === 'undefined') {
+    console.log('[ScamShield] LanguageModel.availability({ expectedInputs: [image] }): unsupported (LanguageModel not defined)');
+    return 'unsupported';
+  }
+  try {
+    const result = await window.LanguageModel.availability({
+      expectedInputs: [{ type: 'image' }],
+    });
+    console.log('[ScamShield] LanguageModel.availability({ expectedInputs: [image] }):', result);
+    return result;
+  } catch (err) {
+    console.warn('[ScamShield] LanguageModel.availability() with image input failed:', err);
+    return 'unsupported';
+  }
+}
+
+/**
  * Triggers the on-device model download / session creation.
  *
  * IMPORTANT: This must be called on or after a user gesture (button click,

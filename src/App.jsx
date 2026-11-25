@@ -906,11 +906,11 @@ function PrelimBubble({ signals }) {
 function OcrConsentBubble({ onConfirm, onCancel, isOffline }) {
   return (
     <div style={S.ocrConsentBubble} className="bubble-enter" role="dialog" aria-label="Upload screenshot for text reading">
-      <strong style={S.ocrConsentTitle}>Reading this screenshot requires cloud processing.</strong>
+      <strong style={S.ocrConsentTitle}>Reading this screenshot needs to go online.</strong>
       <p style={S.ocrConsentBody}>
-        On-device text reading is unavailable on this device. To extract the text,
-        the screenshot must be uploaded. It will not be stored. No personal details
-        from the screenshot are retained by this step.
+        This device can't read images privately. If you continue, the image will be sent to
+        Google's Gemini service to read the text. Screenshots can show names, numbers or
+        balances, so crop out anything private first.
       </p>
       <div style={S.ocrConsentActions}>
         <button className="btn-deeper" onClick={isOffline ? undefined : onConfirm} disabled={isOffline} type="button">
