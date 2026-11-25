@@ -6,6 +6,56 @@ Run the in-app test suite to generate and paste results here:
 
 ---
 
+## Run 3 — 2026-11-25 (session 13: rules-only mode added, eval snapshot updated)
+
+Changes since Run 2:
+- Added "Instant check (any phone, offline)" / Rules only mode to the test suite
+- Rules only: synchronous rule engine with no AI and no network — represents what any phone gets instantly
+- 'unclear' verdict (insufficient rule signal) is displayed as such but scored conservatively as 'suspicious'
+- Results below were computed by tracing rules.js patterns against each test message manually
+
+### Mode Comparison Summary
+
+| Metric | Rules only | AI only | Rules + AI | Cloud |
+|--------|------------|---------|------------|-------|
+| Verdict accuracy | 40% (8/20) | 25% (5/20) | 85% (17/20) | 100% (20/20) |
+| Scams caught     | 12/12 | 12/12 | 12/12 | 12/12 |
+| False alarms     | 4/7 | 4/7 | 3/7 | 0/7 |
+| Needs AI review  | 9/20 | — | — | — |
+| False positives  | 4 | 4 | 3 | 0 |
+| False negatives  | 0 | 0 | 0 | 0 |
+
+AI only / Rules+AI / Cloud stats are from Run 2 (unchanged).
+
+### Rules Only — Per-message Results
+
+| # | Label | Expected | Rules only |
+|---|-------|----------|------------|
+| 1 | Fake debit alert with login link | scam | ✗ unclear† |
+| 2 | BVN / account restriction threat | scam | ✓ scam |
+| 3 | Fake OTP request | scam | ✓ scam |
+| 4 | Job offer with upfront fee | scam | ✓ scam |
+| 5 | Lottery / prize scam | scam | ✗ suspicious |
+| 6 | Agency impersonation / investment pitch | scam | ✗ unclear† |
+| 7 | Wrong transfer refund request | scam | ✗ suspicious |
+| 8 | Phishing link — fake bank login | scam | ✗ unclear† |
+| 9 | Investment doubling scheme | scam | ✗ unclear† |
+| 10 | Genuine bank debit alert (no link) | safe | ✓ safe |
+| 11 | Friend asking to meet | safe | ✗ unclear† |
+| 12 | Delivery update — no payment | safe | ✗ unclear† |
+| 13 | Legitimate OTP (do not share) | safe | ✓ safe |
+| 14 | Work email — meeting reschedule | safe | ✗ unclear† |
+| 15 | Prompt injection attempt | scam | ✓ scam |
+| 16 | Pidgin scam — OTP request | scam | ✗ suspicious |
+| 17 | Pidgin safe — casual check-in | safe | ✗ unclear† |
+| 18 | Ambiguous job inquiry | safe/suspicious | ✓ unclear† |
+| 19 | Defensive OTP — do not share warning | safe | ✓ safe |
+| 20 | Imperative credential ask — OTP phishing | scam | ✗ suspicious |
+
+† unclear = insufficient rule signal; scored as 'suspicious' (conservative). AI review recommended.
+
+---
+
 ## Run 2 — 2026-11-24 (session 7 fixes: brand compliance + cloud non-streaming + #19 FP fix)
 
 Changes since Run 1:

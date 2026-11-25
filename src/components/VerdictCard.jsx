@@ -156,7 +156,7 @@ export default function VerdictCard({ result, originalText, onInvestigate, onRep
       {/* Privacy / source badge */}
       <div style={S.sourceLine}>
         {result.isPreliminary
-          ? '⚡ Instant check from rule engine — AI is confirming…'
+          ? '⚡ Instant check on this phone. Nothing was uploaded.'
           : isCloud
             ? '☁️ Your message was checked online with personal details hidden.'
             : '🔒 Your message stayed on this phone.'}

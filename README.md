@@ -368,10 +368,17 @@ were created for this submission.
 
 ---
 
-## Roadmap
+## Limitations & Roadmap
 
+### Current Limitations
+
+- **On-device AI requires desktop Chrome 139+** — Gemini Nano (the in-browser AI model) only runs on desktop Chrome 139 or newer with 22 GB free disk space and a compatible GPU or 16 GB RAM. It is not available on mobile phones, tablets, or other browsers.
+- **Phones use rules + cloud** — On phones and other unsupported devices, the rule engine runs instantly on-device (private, offline), and the AI check uses the cloud path. The app shows a masking preview so you can review exactly what will be sent before it goes.
+
+### Roadmap
+
+- Android app via Firebase AI Logic hybrid inference with Gemini Nano, when Android support ships
 - Chrome extension (passive background scanning of incoming messages)
-- Android support via Firebase AI Logic when Gemini Nano becomes available on Android
 - Pidgin, Hausa, and Yoruba language support (cloud path)
 - More scam categories: investment scams, romance scams, lottery scams
 

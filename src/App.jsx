@@ -389,7 +389,7 @@ export default function App() {
     const shareText =
       `⚠️ ScamShield Warning: I checked a message and it was flagged as a ${catLabel}${indicatorNote}.\n\n` +
       `Stay safe — don't reply, click links, or send money if you receive it.\n\n` +
-      `🛡️ Check any message free at: ${APP_URL}`;
+      `Check suspicious messages free: ${APP_URL}`;
 
     if (navigator.share) {
       try { await navigator.share({ text: shareText }); } catch { /* user cancelled */ }
@@ -673,6 +673,7 @@ export default function App() {
               {!text && appState === 'idle' && !result && (
                 <>
                   <WelcomeBubble />
+                  <InstallTip />
                   <div style={S.exampleRow} role="list" aria-label="Example messages">
                     {EXAMPLES.map((ex) => (
                       <button
@@ -749,6 +750,7 @@ export default function App() {
                   regexOnly={maskData.regexOnly}
                   onSend={handleCloudSendConfirm}
                   onCancel={handleCloudSendCancel}
+                  subtitle="Want ScamShield's AI to review it? It goes online only if you agree, with your personal details hidden."
                 />
               )}
 
@@ -876,6 +878,56 @@ function WelcomeBubble() {
       <p style={{ ...S.welcomeText, marginTop: 8, opacity: 0.75 }}>
         Check any message before you trust it.
       </p>
+    </div>
+  );
+}
+
+function InstallTip() {
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [visible] = useState(() => {
+    if (localStorage.getItem('install_tip_dismissed')) return false;
+    if (window.matchMedia('(display-mode: standalone)').matches) return false;
+    return window.innerWidth < 768;
+  });
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, [visible]);
+
+  if (!visible || dismissed) return null;
+
+  function handleDismiss() {
+    localStorage.setItem('install_tip_dismissed', '1');
+    setDismissed(true);
+  }
+
+  async function handleInstall() {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    setDeferredPrompt(null);
+    handleDismiss();
+  }
+
+  return (
+    <div style={S.installTip} className="bubble-enter" role="complementary">
+      <p style={S.installTipText}>
+        Add ScamShield to your home screen, then share suspicious messages to it straight from WhatsApp.
+      </p>
+      <div style={S.installTipActions}>
+        {deferredPrompt && (
+          <button className="btn-deeper" onClick={handleInstall} type="button" style={{ width: 'auto', marginBottom: 0 }}>
+            Add to Home Screen
+          </button>
+        )}
+        <button className="btn-ghost" onClick={handleDismiss} type="button">
+          {deferredPrompt ? 'Not now' : 'Dismiss'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1209,6 +1261,26 @@ const S = {
     color: 'var(--safe)',
     maxWidth: '90%',
     lineHeight: 1.5,
+  },
+
+  /* Install tip */
+  installTip: {
+    padding: '12px 16px',
+    background: 'var(--plum-100)',
+    border: '1px solid var(--line)',
+    borderRadius: 'var(--r-bubble-in)',
+    maxWidth: '90%',
+  },
+  installTipText: {
+    fontSize: '0.9rem',
+    color: 'var(--plum-900)',
+    lineHeight: 1.5,
+    margin: '0 0 10px',
+  },
+  installTipActions: {
+    display: 'flex',
+    gap: 8,
+    flexWrap: 'wrap',
   },
 
   /* Dev section */

@@ -6,7 +6,7 @@ import { useState, useMemo } from 'react';
 import { buildMaskedText } from '../ai/maskMessage';
 import { MASK_POLICY, MASK_POLICY_LABELS, PLACEHOLDER_TYPES } from '../config';
 
-export default function SendPreview({ originalText, entities, regexOnly, onSend, onCancel }) {
+export default function SendPreview({ originalText, entities, regexOnly, onSend, onCancel, subtitle }) {
   const [overrides, setOverrides] = useState({});
 
   const actions = useMemo(
@@ -35,6 +35,7 @@ export default function SendPreview({ originalText, entities, regexOnly, onSend,
         <span style={S.lockIcon} aria-hidden="true">🔒</span>
         <div>
           <h2 style={S.title}>Before we search online</h2>
+          {subtitle && <p style={S.subtitle}>{subtitle}</p>}
           {regexOnly && (
             <p style={S.regexNote}>Basic hiding only — private AI unavailable on this phone.</p>
           )}
@@ -140,6 +141,12 @@ const S = {
     fontSize: '1.0625rem',
     margin: 0,
     color: 'var(--plum-900)',
+  },
+  subtitle: {
+    fontSize: '0.9rem',
+    color: 'var(--plum-900)',
+    lineHeight: 1.5,
+    marginTop: 4,
   },
   regexNote: {
     fontSize: '0.8125rem',

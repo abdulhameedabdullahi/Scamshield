@@ -14,15 +14,17 @@
 import { useState, useRef } from 'react';
 import { onDeviceCheck, cloudCheck, warmUpDeviceModel } from '../ai/checkMessage';
 import { aiOnlyCheck } from './aiOnlyCheck';
+import { rulesOnlyCheck } from './rulesOnlyCheck';
 import { TEST_MESSAGES } from './testMessages';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const MODES = [
-  { id: 'ai-only',  label: 'AI only (on-device)',         short: 'AI only'  },
-  { id: 'rules-ai', label: 'Rules + AI (on-device)',       short: 'Rules+AI' },
-  { id: 'cloud',    label: 'Cloud',                        short: 'Cloud'    },
-  { id: 'hybrid',   label: 'Hybrid (on-device + cloud)',   short: 'Hybrid'   },
+  { id: 'rules-only', label: 'Instant check (any phone, offline)', short: 'Rules only' },
+  { id: 'ai-only',    label: 'AI only (on-device)',                 short: 'AI only'    },
+  { id: 'rules-ai',   label: 'Rules + AI (on-device)',              short: 'Rules+AI'   },
+  { id: 'cloud',      label: 'Cloud',                               short: 'Cloud'      },
+  { id: 'hybrid',     label: 'Hybrid (on-device + cloud)',          short: 'Hybrid'     },
 ];
 const MODE_IDS = MODES.map((m) => m.id);
 
@@ -38,6 +40,7 @@ function normalizeVerdict(v) {
 }
 
 async function checkForMode(modeId, text) {
+  if (modeId === 'rules-only') return rulesOnlyCheck(text);
   if (modeId === 'ai-only') return aiOnlyCheck(text);
   if (modeId === 'rules-ai') return onDeviceCheck(text);
   return cloudCheck(text);
@@ -56,7 +59,10 @@ function isRateLimitError(err) {
 }
 
 function buildRow(msg, result, elapsed) {
+  // verdict = scoring verdict; displayVerdict = what appears in the table
+  // rulesOnlyCheck returns rawVerdict:'unclear' + verdict:'suspicious' for low-signal messages
   const verdict = normalizeVerdict(result.verdict);
+  const displayVerdict = normalizeVerdict(result.rawVerdict ?? result.verdict);
   const verdictMatch = Array.isArray(msg.expected)
     ? msg.expected.includes(verdict)
     : verdict === msg.expected;
@@ -72,7 +78,7 @@ function buildRow(msg, result, elapsed) {
     id: msg.id,
     label: msg.label,
     expected: Array.isArray(msg.expected) ? msg.expected.join('/') : msg.expected,
-    actual: verdict,
+    actual: displayVerdict,
     actualCategory: result.category,
     confidence: result.confidence,
     verdictMatch,
@@ -83,6 +89,7 @@ function buildRow(msg, result, elapsed) {
     isCaughtScam,
     durationMs: result.durationMs ?? elapsed,
     sentToCloud: result.sentToCloud ?? false,
+    needsAiReview: result.needsAiReview ?? false,
     error: null,
   };
 }
@@ -134,6 +141,8 @@ function computeStats(rows) {
     ? Math.round(rest.reduce((s, r) => s + r.durationMs, 0) / rest.length)
     : null;
 
+  const needsAiReview = rows.filter((r) => !r.error && r.needsAiReview).length;
+
   return {
     total: rows.length,
     correct,
@@ -144,6 +153,7 @@ function computeStats(rows) {
     scamTotal, scamsCaught,
     safeTotal, falseAlarms,
     cloudCount,
+    needsAiReview,
     firstMs, avgMs,
   };
 }
@@ -239,7 +249,7 @@ export default function TestRunner() {
     delete modeRowsRef.current[selectedMode];
     setModeRows({ ...modeRowsRef.current });
 
-    if (selectedMode !== 'cloud') {
+    if (selectedMode !== 'cloud' && selectedMode !== 'rules-only') {
       await doWarmup();
     }
 
@@ -297,6 +307,7 @@ export default function TestRunner() {
       if (row.error) return { verdict: null, correct: false, error: row.error.slice(0, 200) };
       const base = { verdict: row.actual, correct: row.verdictMatch };
       if (includeCloud) base.sentToCloud = row.sentToCloud ?? false;
+      if (row.needsAiReview) base.needsAiReview = true;
       return base;
     }
     function transformStats(stats) {
@@ -315,10 +326,11 @@ export default function TestRunner() {
       },
       datasetSize: TEST_MESSAGES.length,
       modes: {
-        aiOnly:  transformStats(computeStats(modeRows['ai-only'])),
-        rulesAi: transformStats(computeStats(modeRows['rules-ai'])),
-        cloud:   transformStats(computeStats(modeRows['cloud'])),
-        hybrid:  transformStats(computeStats(modeRows['hybrid'])),
+        rulesOnly: transformStats(computeStats(modeRows['rules-only'])),
+        aiOnly:    transformStats(computeStats(modeRows['ai-only'])),
+        rulesAi:   transformStats(computeStats(modeRows['rules-ai'])),
+        cloud:     transformStats(computeStats(modeRows['cloud'])),
+        hybrid:    transformStats(computeStats(modeRows['hybrid'])),
       },
       messages: TEST_MESSAGES.map((msg, i) => ({
         id: msg.id,
@@ -327,10 +339,11 @@ export default function TestRunner() {
         preview: msg.text.slice(0, 80) + (msg.text.length > 80 ? '…' : ''),
         expected: Array.isArray(msg.expected) ? msg.expected.join('/') : msg.expected,
         results: {
-          aiOnly:  rowToResult(modeRows['ai-only']?.[i]),
-          rulesAi: rowToResult(modeRows['rules-ai']?.[i]),
-          cloud:   rowToResult(modeRows['cloud']?.[i]),
-          hybrid:  rowToResult(modeRows['hybrid']?.[i], true),
+          rulesOnly: rowToResult(modeRows['rules-only']?.[i]),
+          aiOnly:    rowToResult(modeRows['ai-only']?.[i]),
+          rulesAi:   rowToResult(modeRows['rules-ai']?.[i]),
+          cloud:     rowToResult(modeRows['cloud']?.[i]),
+          hybrid:    rowToResult(modeRows['hybrid']?.[i], true),
         },
       })),
     };
@@ -361,42 +374,53 @@ export default function TestRunner() {
 
     if (allModesComplete) {
       lines.push('### Mode Comparison Summary', '');
-      lines.push('| Metric | AI only | Rules + AI | Cloud | Hybrid |');
-      lines.push('|--------|---------|------------|-------|--------|');
+      const modeShorts = MODES.map((m) => m.short);
+      lines.push(`| Metric | ${modeShorts.join(' | ')} |`);
+      lines.push(`|--------|${MODES.map(() => '---').join('|')}|`);
 
       const stats = {};
       for (const id of MODE_IDS) stats[id] = computeStats(modeRows[id]);
       const s = (id) => stats[id];
+      const cell = (id, fn) => (s(id) ? fn(id) : '—');
 
       const n = TEST_MESSAGES.length;
-      lines.push(
-        `| Verdict accuracy | ${s('ai-only').accuracy}% (${s('ai-only').correct}/${s('ai-only').total}) | ${s('rules-ai').accuracy}% (${s('rules-ai').correct}/${s('rules-ai').total}) | ${s('cloud').accuracy}% (${s('cloud').correct}/${s('cloud').total}) | ${s('hybrid').accuracy}% (${s('hybrid').correct}/${s('hybrid').total}) |`,
-        `| Scams caught     | ${s('ai-only').scamsCaught}/${s('ai-only').scamTotal} | ${s('rules-ai').scamsCaught}/${s('rules-ai').scamTotal} | ${s('cloud').scamsCaught}/${s('cloud').scamTotal} | ${s('hybrid').scamsCaught}/${s('hybrid').scamTotal} |`,
-        `| False alarms     | ${s('ai-only').falseAlarms}/${s('ai-only').safeTotal} | ${s('rules-ai').falseAlarms}/${s('rules-ai').safeTotal} | ${s('cloud').falseAlarms}/${s('cloud').safeTotal} | ${s('hybrid').falseAlarms}/${s('hybrid').safeTotal} |`,
-        `| False positives  | ${s('ai-only').fp} | ${s('rules-ai').fp} | ${s('cloud').fp} | ${s('hybrid').fp} |`,
-        `| False negatives  | ${s('ai-only').fn} | ${s('rules-ai').fn} | ${s('cloud').fn} | ${s('hybrid').fn} |`,
-        `| Errors           | ${s('ai-only').errors} | ${s('rules-ai').errors} | ${s('cloud').errors} | ${s('hybrid').errors} |`,
-        `| Sent to cloud    | 0/${n} | 0/${n} | ${n}/${n} | ${s('hybrid').cloudCount ?? '—'}/${n} |`,
-        `| First run        | ${s('ai-only').firstMs?.toLocaleString() ?? '—'} ms | ${s('rules-ai').firstMs?.toLocaleString() ?? '—'} ms | ${s('cloud').firstMs?.toLocaleString() ?? '—'} ms | ${s('hybrid').firstMs?.toLocaleString() ?? '—'} ms |`,
-        `| Avg (runs 2–${n}) | ${s('ai-only').avgMs?.toLocaleString() ?? '—'} ms | ${s('rules-ai').avgMs?.toLocaleString() ?? '—'} ms | ${s('cloud').avgMs?.toLocaleString() ?? '—'} ms | ${s('hybrid').avgMs?.toLocaleString() ?? '—'} ms |`,
-      );
+      const metricRows = [
+        ['Verdict accuracy', (id) => `${s(id).accuracy}% (${s(id).correct}/${s(id).total})`],
+        ['Scams caught',     (id) => `${s(id).scamsCaught}/${s(id).scamTotal}`],
+        ['False alarms',     (id) => `${s(id).falseAlarms}/${s(id).safeTotal}`],
+        ['False positives',  (id) => s(id).fp],
+        ['False negatives',  (id) => s(id).fn],
+        ['Errors',           (id) => s(id).errors],
+        ['Needs AI review',  (id) => s(id).needsAiReview > 0 ? `${s(id).needsAiReview}/${n}` : `0/${n}`],
+        ['Sent to cloud',    (id) => {
+          if (id === 'cloud') return `${n}/${n}`;
+          if (id === 'hybrid') return s(id).cloudCount != null ? `${s(id).cloudCount}/${n}` : '—';
+          return `0/${n}`;
+        }],
+        ['First run',        (id) => s(id).firstMs != null ? `${s(id).firstMs.toLocaleString()} ms` : '—'],
+        [`Avg (2–${n})`,     (id) => s(id).avgMs != null ? `${s(id).avgMs.toLocaleString()} ms` : '—'],
+      ];
+      metricRows.forEach(([label, fn]) => {
+        lines.push(`| ${label} | ${MODE_IDS.map((id) => cell(id, fn)).join(' | ')} |`);
+      });
       lines.push('');
 
       lines.push('### Per-message Results', '');
-      lines.push('| # | Label | Expected | AI only | Rules + AI | Cloud | Hybrid |');
-      lines.push('|---|-------|----------|---------|------------|-------|--------|');
+      lines.push(`| # | Label | Expected | ${modeShorts.join(' | ')} |`);
+      lines.push(`|---|-------|----------|${MODES.map(() => '---').join('|')}|`);
 
       TEST_MESSAGES.forEach((msg, i) => {
         const exp = Array.isArray(msg.expected) ? msg.expected.join('/') : msg.expected;
         const cells = MODE_IDS.map((id) => {
           const row = modeRows[id]?.[i];
           if (!row) return '—';
-          if (row.error) return `ERR`;
+          if (row.error) return 'ERR';
           const mark = row.verdictMatch ? '✓' : '✗';
           const cloud = (id === 'hybrid' && row.sentToCloud) ? ' ☁️' : '';
           const fp = row.isFP ? ' FP' : '';
           const fn = row.isFN ? ' FN' : '';
-          return `${mark} ${row.actual}${cloud}${fp}${fn}`;
+          const ai = row.needsAiReview ? ' ?' : '';
+          return `${mark} ${row.actual}${cloud}${fp}${fn}${ai}`;
         });
         lines.push(`| ${msg.id} | ${msg.label} | ${exp} | ${cells.join(' | ')} |`);
       });
@@ -583,6 +607,7 @@ function ComparisonView({ modeRows, warmupMs }) {
   const s = (id) => stats[id];
 
   const n = TEST_MESSAGES.length;
+  const anyNeedsAiReview = Object.values(stats).some((st) => st && st.needsAiReview > 0);
   const metricRows = [
     ['Verdict accuracy', (id) => `${s(id).accuracy}% (${s(id).correct}/${s(id).total})`],
     ['Scams caught',     (id) => `${s(id).scamsCaught}/${s(id).scamTotal}`],
@@ -590,6 +615,7 @@ function ComparisonView({ modeRows, warmupMs }) {
     ['False positives',  (id) => s(id).fp],
     ['False negatives',  (id) => s(id).fn],
     ['Errors',           (id) => s(id).errors],
+    ...(anyNeedsAiReview ? [['Needs AI review', (id) => s(id).needsAiReview > 0 ? `${s(id).needsAiReview}/${n}` : `0/${n}`]] : []),
     ['Sent to cloud',    (id) => {
       if (id === 'cloud') return `${n}/${n}`;
       if (id === 'hybrid') return s(id).cloudCount != null ? `${s(id).cloudCount}/${n}` : '—';
@@ -685,6 +711,7 @@ function SingleModeView({ modeId, rows, warmupMs }) {
           <span style={styles.statBadge}>FP: {stats.fp}</span>
           <span style={styles.statBadge}>FN: {stats.fn}</span>
           {stats.errors > 0 && <span style={{ ...styles.statBadge, ...styles.badgeError }}>Errors: {stats.errors}</span>}
+          {stats.needsAiReview > 0 && <span style={{ ...styles.statBadge, ...styles.badgeAi }}>Needs AI review: {stats.needsAiReview}/{rows.length}</span>}
           {stats.firstMs != null && (
             <span style={styles.timingPill}>First: {stats.firstMs.toLocaleString()} ms</span>
           )}
@@ -765,6 +792,7 @@ function VerdictPill({ v }) {
     scam:       { bg: '#fee2e2', text: '#991b1b' },
     suspicious: { bg: '#fef3c7', text: '#92400e' },
     safe:       { bg: '#dcfce7', text: '#166534' },
+    unclear:    { bg: '#f0f9ff', text: '#0369a1' },
   };
   const c = colors[base] ?? { bg: '#f3f4f6', text: '#6b7280' };
   return (
@@ -917,6 +945,10 @@ const styles = {
   badgeError: {
     background: '#fef2f2',
     color: '#991b1b',
+  },
+  badgeAi: {
+    background: '#f0f9ff',
+    color: '#0369a1',
   },
   timingPill: {
     fontSize: '0.78rem',
