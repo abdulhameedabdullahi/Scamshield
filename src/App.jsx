@@ -20,6 +20,7 @@ import Dashboard from './components/dashboard/Dashboard';
 import PrivacyPage from './components/pages/PrivacyPage';
 import AboutPage from './components/pages/AboutPage';
 import { Menu, X } from 'lucide-react';
+import { isOverDailyLimit, incrementDailyCount } from './services/dailyQuota';
 // Category labels used for the share warning message
 const CATEGORY_LABELS = {
   fake_bank_alert:          'fake bank alert',
@@ -88,7 +89,7 @@ function hashToPage(hash) {
 const EXAMPLES = [
   {
     label: 'Bank alert',
-    text: 'ALERT: Your GTBank account has been debited N150,000. If you did not authorise this, click here to reverse: http://gtbnk-verify.com/secure',
+    text: 'ALERT: Your Halden Bank account has been debited N150,000. If you did not authorise this, click here to reverse: http://halden-verify.com/secure',
   },
   {
     label: 'Job offer',
@@ -96,7 +97,7 @@ const EXAMPLES = [
   },
   {
     label: 'BVN threat',
-    text: 'CBN NOTICE: Your BVN has been flagged for suspicious activity. Update your BVN immediately at www.cbn-bvn-update.net or your accounts will be frozen within 24 hours.',
+    text: 'NRA NOTICE: Your BVN has been flagged for suspicious activity. Update your BVN immediately at www.nra-bvn-update.net or your accounts will be frozen within 24 hours.',
   },
 ];
 
@@ -137,7 +138,6 @@ export default function App() {
   const [availability, setAvailability]     = useState(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [devOpen, setDevOpen]               = useState(false);
-  const [checkStartTime, setCheckStartTime] = useState(null);
   const [maskData, setMaskData]             = useState(null);
 
   // Image OCR state
@@ -146,6 +146,7 @@ export default function App() {
 
   // Community report state
   const [communityData, setCommunityData]   = useState(null);
+  const [communityQueried, setCommunityQueried] = useState(null); // { kind: 'phone'|'domain' } | null
   const [reportState, setReportState]       = useState('idle'); // 'idle' | 'saving' | 'done'
 
   // Agent state
@@ -160,15 +161,24 @@ export default function App() {
   const [prelimResult, setPrelimResult] = useState(null);
   // OCR consent: set when on-device OCR unavailable, cleared by confirm/cancel
   const [ocrConsentData, setOcrConsentData] = useState(null);
+  // Agent quota error
+  const [investigateError, setInvestigateError] = useState(null);
+  // Offline detection
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   // Scroll
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    if (!checkStartTime) return;
-    const id = setInterval(() => {}, 100);
-    return () => clearInterval(id);
-  }, [checkStartTime]);
+    const setOnline  = () => setIsOffline(false);
+    const setOffline = () => setIsOffline(true);
+    window.addEventListener('online',  setOnline);
+    window.addEventListener('offline', setOffline);
+    return () => {
+      window.removeEventListener('online',  setOnline);
+      window.removeEventListener('offline', setOffline);
+    };
+  }, []);
 
   useEffect(() => {
     getOnDeviceAvailability().then(setAvailability);
@@ -181,9 +191,6 @@ export default function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [appState, investigateState, result]);
-
-  function startProgress() { setCheckStartTime(Date.now()); }
-  function stopProgress()  { setCheckStartTime(null); }
 
   function handleTextChange(newText) {
     setText(newText);
@@ -201,7 +208,8 @@ export default function App() {
     setPreliminarySignals(null);
     setPrelimResult(null);
     setOcrConsentData(null);
-    setCommunityData(null); setReportState('idle');
+    setInvestigateError(null);
+    setCommunityData(null); setCommunityQueried(null); setReportState('idle');
   }
 
   function handleClear() {
@@ -210,7 +218,8 @@ export default function App() {
     setInvestigateMaskedText(null); setInvestigateVerdict(null);
     setPreliminarySignals(null); setPrelimResult(null);
     setImageData(null); setOcrState('idle'); setOcrConsentData(null);
-    setCommunityData(null); setReportState('idle');
+    setInvestigateError(null);
+    setCommunityData(null); setCommunityQueried(null); setReportState('idle');
   }
 
   // ── Image handling ──────────────────────────────────────────────────────
@@ -221,7 +230,7 @@ export default function App() {
       const base64 = e.target.result.split(',')[1];
       const mimeType = file.type || 'image/png';
       setImageData({ base64, mimeType, preview: e.target.result });
-      setCommunityData(null); setReportState('idle');
+      setCommunityData(null); setCommunityQueried(null); setReportState('idle');
     };
     reader.readAsDataURL(file);
   }
@@ -233,7 +242,8 @@ export default function App() {
     setInvestigateState('idle'); setInvestigateMaskData(null);
     setInvestigateMaskedText(null); setInvestigateVerdict(null);
     setPreliminarySignals(null); setPrelimResult(null);
-    setCommunityData(null); setReportState('idle');
+    setInvestigateError(null);
+    setCommunityData(null); setCommunityQueried(null); setReportState('idle');
     try {
       const ocrResult = await ocrImage(imageData);
       if (ocrResult.needsCloudConsent) {
@@ -255,12 +265,19 @@ export default function App() {
 
   async function handleOcrCloudConfirm() {
     if (!ocrConsentData) return;
+    if (isOverDailyLimit()) {
+      setOcrConsentData(null);
+      setErrorMsg('You\'ve reached the daily limit of 15 online checks. Try again tomorrow.');
+      setAppState('error');
+      return;
+    }
     const { imageData: imgData } = ocrConsentData;
     setOcrConsentData(null);
     setOcrState('reading_cloud');
     setAppState('checking'); setResult(null); setErrorMsg('');
     try {
       const { text: extracted } = await ocrImageCloud(imgData);
+      incrementDailyCount();
       setText(extracted);
       setOcrState('idle');
       await _runCheckOnExtracted(extracted);
@@ -284,10 +301,9 @@ export default function App() {
     setPrelimResult(prelim);
     if (prelim) console.log(`[ScamShield] Stage A (rule engine, ~0ms): ${prelim.verdict}`);
     const stageATime = Date.now();
-    setAppState('checking'); startProgress();
+    setAppState('checking');
     try {
       const outcome = await checkMessage(extracted, () => {});
-      stopProgress();
       console.log(`[ScamShield] Stage B (AI): ${Date.now() - stageATime}ms → ${outcome.state ?? outcome.verdict}`);
       if (outcome.state === 'needs_download') {
         setAvailability(outcome.availability); setAppState('needs_download');
@@ -308,7 +324,6 @@ export default function App() {
         fetchCommunityData(outcome);
       }
     } catch (err) {
-      stopProgress();
       setErrorMsg(err?.message ?? 'Something went wrong. Please try again.');
       setAppState('error');
     }
@@ -317,15 +332,17 @@ export default function App() {
   // ── Community lookup (runs silently after check completes) ──────────────
 
   async function fetchCommunityData(outcome) {
+    if (!navigator.onLine) return;
     try {
       const signals = outcome.signals ?? [];
       const phoneSig = signals.find((s) => s.id === 'phone_number' && s.phrase);
       const urlSig   = signals.find((s) => s.id === 'link' && s.phrase);
       if (!phoneSig && !urlSig) return;
 
-      const indicator     = phoneSig?.phrase ?? urlSig?.phrase;
-      const kind          = phoneSig ? 'phone' : 'domain';
-      const data          = await queryReports(indicator, kind);
+      const indicator = phoneSig?.phrase ?? urlSig?.phrase;
+      const kind      = phoneSig ? 'phone' : 'domain';
+      setCommunityQueried({ kind });
+      const data = await queryReports(indicator, kind);
       if (data.count > 0) {
         setCommunityData({ ...data, indicatorKind: kind, indicator });
       }
@@ -391,7 +408,8 @@ export default function App() {
     setResult(null); setErrorMsg(''); setMaskData(null);
     setInvestigateState('idle'); setInvestigateMaskData(null);
     setInvestigateMaskedText(null); setInvestigateVerdict(null);
-    setCommunityData(null); setReportState('idle');
+    setInvestigateError(null);
+    setCommunityData(null); setCommunityQueried(null); setReportState('idle');
 
     // Stage A: synchronous rule engine — build preliminary verdict instantly
     const { signals, ruleScore } = analyzeSignals(trimmed);
@@ -402,10 +420,8 @@ export default function App() {
     const stageATime = Date.now();
 
     setAppState('checking');
-    startProgress();
     try {
       const outcome = await checkMessage(trimmed, () => {});
-      stopProgress();
       console.log(`[ScamShield] Stage B (AI): ${Date.now() - stageATime}ms → ${outcome.state ?? outcome.verdict}`);
       if (outcome.state === 'needs_download') {
         setAvailability(outcome.availability); setAppState('needs_download');
@@ -426,7 +442,6 @@ export default function App() {
         fetchCommunityData(outcome);
       }
     } catch (err) {
-      stopProgress();
       setErrorMsg(err?.message ?? 'Something went wrong. Please try again.');
       setAppState('error');
     }
@@ -457,14 +472,18 @@ export default function App() {
   }, []);
 
   async function handleCloudSendConfirm(maskedText) {
+    if (isOverDailyLimit()) {
+      setErrorMsg('You\'ve reached the daily limit of 15 online checks. Try again tomorrow, or use the on-device check if available.');
+      setAppState('error');
+      return;
+    }
     setAppState('checking'); setMaskData(null); setResult(null); setErrorMsg('');
-    startProgress();
     try {
       const outcome = await cloudCheck(text, () => {}, maskedText);
-      stopProgress(); setResult(outcome); setAppState('done');
+      incrementDailyCount();
+      setResult(outcome); setAppState('done');
       fetchCommunityData(outcome);
     } catch (err) {
-      stopProgress();
       setErrorMsg(err?.message ?? 'Couldn\'t check online. Check your internet and try again.');
       setAppState('error');
     }
@@ -473,6 +492,11 @@ export default function App() {
   function handleCloudSendCancel() { setAppState('idle'); setMaskData(null); }
 
   async function handleInvestigateRequest(verdictResult) {
+    if (isOverDailyLimit()) {
+      setInvestigateError('You\'ve reached the daily limit of 15 online checks. Try again tomorrow.');
+      return;
+    }
+    setInvestigateError(null);
     setInvestigateState('masking'); setInvestigateMaskData(null);
     setInvestigateMaskedText(null); setInvestigateVerdict(verdictResult);
     try {
@@ -485,6 +509,7 @@ export default function App() {
   }
 
   function handleInvestigateSendConfirm(maskedText) {
+    incrementDailyCount();
     setInvestigateMaskedText(maskedText);
     setInvestigateMaskData(null);
     setInvestigateState('running');
@@ -502,7 +527,7 @@ export default function App() {
 
   const isChecking   = appState === 'checking';
   const isDownloading = appState === 'downloading';
-  const isDev = import.meta.env.DEV || window.location.hash.includes('dev');
+  const isDev = import.meta.env.DEV;
   const hasConversation = !!(text || result || appState !== 'idle');
 
   const checkingLabel = availability === 'available'
@@ -632,6 +657,13 @@ export default function App() {
             onDownloadRequest={handlePreload}
           />
 
+          {/* Offline notice */}
+          {isOffline && (
+            <div style={S.offlineBanner} role="status" aria-live="polite">
+              You're offline — checking still works on this phone. Online features are unavailable.
+            </div>
+          )}
+
           {/* Chat thread */}
           <div className="chat-thread">
             <div className="chat-inner">
@@ -668,6 +700,7 @@ export default function App() {
                 <OcrConsentBubble
                   onConfirm={handleOcrCloudConfirm}
                   onCancel={handleOcrCloudCancel}
+                  isOffline={isOffline}
                 />
               )}
 
@@ -731,6 +764,8 @@ export default function App() {
                   result={result}
                   originalText={text}
                   communityData={communityData}
+                  communityQueried={communityQueried}
+                  isOffline={isOffline}
                   onInvestigate={
                     investigateState === 'idle'
                       ? () => handleInvestigateRequest(result)
@@ -743,6 +778,13 @@ export default function App() {
               {appState === 'done' && reportState === 'done' && (
                 <div style={S.reportedBadge} className="bubble-enter" role="status">
                   ✓ Reported — thank you for helping protect the community.
+                </div>
+              )}
+
+              {/* ── Agent quota / investigate error ── */}
+              {investigateError && (
+                <div style={S.errorBubble} className="bubble-enter" role="alert">
+                  {investigateError}
                 </div>
               )}
 
@@ -828,7 +870,7 @@ function WelcomeBubble() {
     <div style={S.welcomeBubble} className="bubble-enter" role="status">
       <p style={S.welcomeText}>
         Hi! Paste any message you're unsure about — a WhatsApp message, SMS or email.
-        I'll check it on your phone first. Nothing is uploaded unless you say so.
+        I'll check it on your phone first. Personal details are hidden before anything goes online.
       </p>
       <p style={{ ...S.welcomeText, marginTop: 8, opacity: 0.75 }}>
         Check any message before you trust it.
@@ -861,7 +903,7 @@ function PrelimBubble({ signals }) {
   );
 }
 
-function OcrConsentBubble({ onConfirm, onCancel }) {
+function OcrConsentBubble({ onConfirm, onCancel, isOffline }) {
   return (
     <div style={S.ocrConsentBubble} className="bubble-enter" role="dialog" aria-label="Upload screenshot for text reading">
       <strong style={S.ocrConsentTitle}>Reading this screenshot requires cloud processing.</strong>
@@ -871,13 +913,18 @@ function OcrConsentBubble({ onConfirm, onCancel }) {
         from the screenshot are retained by this step.
       </p>
       <div style={S.ocrConsentActions}>
-        <button className="btn-deeper" onClick={onConfirm} type="button">
+        <button className="btn-deeper" onClick={isOffline ? undefined : onConfirm} disabled={isOffline} type="button">
           Upload and read
         </button>
         <button className="btn-ghost" onClick={onCancel} type="button">
           Cancel
         </button>
       </div>
+      {isOffline && (
+        <p style={{ ...S.ocrConsentBody, color: '#888', fontStyle: 'italic' }}>
+          You're offline — upload unavailable.
+        </p>
+      )}
     </div>
   );
 }
@@ -982,6 +1029,18 @@ const S = {
     height: 1,
     background: 'var(--line)',
     margin: '8px 20px',
+  },
+
+  /* Offline banner */
+  offlineBanner: {
+    margin: '0 16px 8px',
+    padding: '8px 14px',
+    background: '#FFF9C4',
+    border: '1px solid #FDE68A',
+    borderRadius: 10,
+    fontSize: '0.875rem',
+    color: '#78350f',
+    lineHeight: 1.4,
   },
 
   /* Welcome */

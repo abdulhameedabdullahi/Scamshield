@@ -2,10 +2,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /reports/{reportId} {
-      // Anyone can read reports (needed for community lookups)
-      allow read: if true;
+      // Individual document reads require auth (anonymous auth counts).
+      allow get: if request.auth != null;
 
-      // Only signed-in users (anonymous auth counts) can create reports.
+      // List queries require auth and a hard limit to prevent scraping.
+      allow list: if request.auth != null
+        && request.query.limit <= 100;
+
+      // Only signed-in users can create reports.
       // Field allow-list: no raw indicator, no message text — only the SHA-256 hash.
       allow create: if request.auth != null
         && request.resource.data.keys().hasOnly([
@@ -14,11 +18,16 @@ service cloud.firestore {
         && request.resource.data.indicatorHash is string
         && request.resource.data.indicatorHash.size() == 64
         && request.resource.data.kind in ['domain', 'phone']
-        && request.resource.data.category is string
+        && request.resource.data.category in [
+             'fake_bank_alert', 'account_block_or_bvn_nin', 'otp_pin_request',
+             'job_or_loan_upfront_fee', 'prize_or_lottery', 'impersonation',
+             'investment_scheme', 'wrong_transfer_refund', 'romance',
+             'phishing_link', 'other', 'none'
+           ]
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.createdAt == request.time;
 
-      // No updates or deletes from the client
+      // No updates or deletes from the client.
       allow update, delete: if false;
     }
   }

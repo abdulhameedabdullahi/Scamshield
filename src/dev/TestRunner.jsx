@@ -12,7 +12,7 @@
 // "Export" generates a Markdown report for docs/eval-results.md.
 
 import { useState, useRef } from 'react';
-import { onDeviceCheck, cloudCheck, hybridCheck, warmUpDeviceModel } from '../ai/checkMessage';
+import { onDeviceCheck, cloudCheck, warmUpDeviceModel } from '../ai/checkMessage';
 import { aiOnlyCheck } from './aiOnlyCheck';
 import { TEST_MESSAGES } from './testMessages';
 
@@ -40,7 +40,6 @@ function normalizeVerdict(v) {
 async function checkForMode(modeId, text) {
   if (modeId === 'ai-only') return aiOnlyCheck(text);
   if (modeId === 'rules-ai') return onDeviceCheck(text);
-  if (modeId === 'hybrid') return hybridCheck(text);
   return cloudCheck(text);
 }
 

@@ -1,67 +1,53 @@
-// PrivacyPage — plain-language 3-step privacy explainer
-
-import { Lock, Smartphone, Search, Users } from 'lucide-react';
+// PrivacyPage — accurate plain-language disclosure of what goes online and when
 
 export default function PrivacyPage() {
   return (
     <div className="page-scroll">
       <div className="page-content">
-        <h1 style={S.h1}>How your privacy is protected</h1>
-        <p style={S.lead}>
-          Your message never goes anywhere without your knowledge. Here is exactly what happens.
-        </p>
+        <h1 style={S.h1}>What goes online and what doesn't</h1>
 
-        <div style={S.steps}>
-          <Step
-            icon={<Smartphone size={28} color="var(--plum-700)" strokeWidth={1.75} />}
-            number="1"
-            title="Checked on your phone first"
-            body="When you paste a message, ScamShield reads it using a small AI model that runs directly on your phone — not on any server. Your message is never uploaded at this stage."
-          />
-          <div style={S.connector} aria-hidden="true" />
-          <Step
-            icon={<Lock size={28} color="var(--plum-700)" strokeWidth={1.75} />}
-            number="2"
-            title="Personal details are hidden"
-            body="If you choose to search online, we scan your message for personal details — names, account numbers, phone numbers, OTP codes, BVN/NIN — and replace them with labels like [NAME_1] and [ACCOUNT_1]. The original values never leave your phone."
-          />
-          <div style={S.connector} aria-hidden="true" />
-          <Step
-            icon={<Search size={28} color="var(--plum-700)" strokeWidth={1.75} />}
-            number="3"
-            title="Only searched online if you ask"
-            body="After you review the hidden version and tap 'Search online', only that masked text is sent — never the original message. You can also cancel at any point."
-          />
-          <div style={S.connector} aria-hidden="true" />
-          <Step
-            icon={<Users size={28} color="var(--plum-700)" strokeWidth={1.75} />}
-            number="4"
-            title="Community reports store fingerprints only"
-            body="When you report a scam, only a one-way cryptographic fingerprint (SHA-256 hash) of the scammer's phone number or link is stored — never the number or link itself. No one, including ScamShield, can reverse a fingerprint back to the original. Your report helps protect others without exposing any real contact details."
-          />
+        <div style={S.block}>
+          <h2 style={S.blockTitle}>Always stays on this phone</h2>
+          <ul style={S.list}>
+            <li style={S.listItem}>
+              <strong>Your message text</strong> — ScamShield reads it using Gemini Nano, a local AI model that runs directly in Chrome. No text leaves your device at this stage.
+            </li>
+            <li style={S.listItem}>
+              <strong>Personal detail masking</strong> — Names, account numbers, OTPs, BVN/NIN are detected and replaced with labels like [NAME_1] entirely on-device before anything is transmitted.
+            </li>
+            <li style={S.listItem}>
+              <strong>Fingerprinting</strong> — Phone numbers and links are converted to a one-way SHA-256 hash on-device first. The raw number or link is never transmitted.
+            </li>
+          </ul>
+        </div>
+
+        <div style={S.block}>
+          <h2 style={S.blockTitle}>What goes online and when</h2>
+          <ul style={S.list}>
+            <li style={S.listItem}>
+              <strong>On every page load</strong> — Google reCAPTCHA Enterprise runs automatically to verify that requests come from a real browser. This is required by Firebase to protect the service from abuse. No message data is involved.
+            </li>
+            <li style={S.listItem}>
+              <strong>After each check with a phone number or link (automatic)</strong> — An anonymous SHA-256 fingerprint of that number or link is queried in <strong>Google Firestore</strong> to check whether other ScamShield users have reported it. The raw number or link is never sent or stored. A note appears below the result when this lookup ran.
+            </li>
+            <li style={S.listItem}>
+              <strong>Only after "Search online" (your choice)</strong> — The masked version of your message (personal details replaced with labels) is sent to <strong>Google AI (Gemini)</strong> for a deeper analysis. You review exactly what will be sent before confirming.
+            </li>
+            <li style={S.listItem}>
+              <strong>Only after "Upload and read" (your choice)</strong> — Your screenshot is sent to <strong>Google AI (Gemini)</strong> for text extraction. Only after you explicitly confirm the upload.
+            </li>
+            <li style={S.listItem}>
+              <strong>Only after "Report this scam" (your choice)</strong> — A report is saved to <strong>Google Firestore</strong> containing: the scam category, an anonymous SHA-256 fingerprint of the scammer's number or link, and a randomly-generated anonymous user ID. No message text is stored.
+            </li>
+            <li style={S.listItem}>
+              <strong>When the agent checks a link (optional, within "Dig deeper")</strong> — The link may be checked against <strong>Google Safe Browsing</strong> to test whether it is flagged for phishing or malware. Any result from Safe Browsing is marked "Advisory provided by Google".
+            </li>
+          </ul>
         </div>
 
         <div style={S.note}>
-          <strong>No account needed.</strong> ScamShield does not store your messages,
-          create a profile, or share anything with third parties.
-          Community scam reports store only cryptographic fingerprints of scammer identifiers — no raw phone numbers or links are ever written to the database.
-          The optional ScamShield Agent searches the web on your behalf using the masked text only.
+          No account is needed. ScamShield does not build profiles or store message text. Anonymous user IDs are generated randomly by Firebase and are not linked to your identity. All Google services listed above operate under their standard privacy policies.
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Step({ icon, number, title, body }) {
-  return (
-    <div style={S.step}>
-      <div style={S.stepIcon}>
-        {icon}
-        <span style={S.stepNum}>{number}</span>
-      </div>
-      <div>
-        <h2 style={S.stepTitle}>{title}</h2>
-        <p style={S.stepBody}>{body}</p>
       </div>
     </div>
   );
@@ -72,67 +58,29 @@ const S = {
     fontSize: '1.75rem',
     marginBottom: 10,
   },
-  lead: {
-    fontSize: '1.0625rem',
-    color: '#555',
-    lineHeight: 1.6,
-    marginBottom: 36,
+  block: {
+    marginBottom: 32,
   },
-  steps: {
+  blockTitle: {
+    fontSize: '1.0625rem',
+    fontWeight: 700,
+    marginBottom: 14,
+    color: 'var(--plum-900)',
+  },
+  list: {
+    listStyle: 'none',
+    margin: 0,
+    padding: 0,
     display: 'flex',
     flexDirection: 'column',
-    gap: 0,
-    marginBottom: 36,
+    gap: 14,
   },
-  step: {
-    display: 'flex',
-    gap: 20,
-    alignItems: 'flex-start',
-    padding: '20px 0',
-  },
-  stepIcon: {
-    position: 'relative',
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    background: 'var(--plum-100)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  stepNum: {
-    position: 'absolute',
-    top: -6,
-    right: -6,
-    width: 20,
-    height: 20,
-    borderRadius: '50%',
-    background: 'var(--plum-700)',
-    color: 'white',
-    fontSize: '0.75rem',
-    fontWeight: 700,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    lineHeight: 1,
-  },
-  stepTitle: {
-    fontSize: '1.0625rem',
-    marginBottom: 6,
-  },
-  stepBody: {
+  listItem: {
     fontSize: '0.9375rem',
     lineHeight: 1.6,
     color: '#444',
-  },
-  connector: {
-    marginLeft: 26,
-    width: 2,
-    height: 20,
-    background: 'var(--line)',
-    borderRadius: 2,
-    flexShrink: 0,
+    paddingLeft: 20,
+    borderLeft: '3px solid var(--plum-100)',
   },
   note: {
     padding: '16px 20px',

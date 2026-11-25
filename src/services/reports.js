@@ -100,6 +100,7 @@ export async function queryReports(indicator, kind) {
   }
 
   try {
+    await ensureAuth();
     const indHash = await hashIndicator(normalised);
 
     const q = query(

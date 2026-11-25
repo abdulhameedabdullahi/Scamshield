@@ -53,7 +53,7 @@ const CATEGORY_LABELS = {
   other:                    'Other suspicious message',
 };
 
-export default function VerdictCard({ result, originalText, onInvestigate, onReport, onShare, communityData }) {
+export default function VerdictCard({ result, originalText, onInvestigate, onReport, onShare, communityData, communityQueried, isOffline }) {
   const cfg = VERDICT_CFG[result.verdict] ?? VERDICT_CFG.suspicious;
   const isSafe = result.verdict === 'safe';
   const isCloud = result.source === 'cloud';
@@ -134,7 +134,7 @@ export default function VerdictCard({ result, originalText, onInvestigate, onRep
       {/* Action buttons row */}
       <div style={S.actionRow}>
         {onInvestigate && (
-          <button className="btn-deeper" onClick={onInvestigate} type="button">
+          <button className="btn-deeper" onClick={isOffline ? undefined : onInvestigate} disabled={isOffline} type="button">
             Dig deeper online
           </button>
         )}
@@ -144,21 +144,29 @@ export default function VerdictCard({ result, originalText, onInvestigate, onRep
           </button>
         )}
         {!isSafe && onReport && (
-          <button className="btn-report-scam" onClick={onReport} type="button">
+          <button className="btn-report-scam" onClick={isOffline ? undefined : onReport} disabled={isOffline} type="button">
             Report this scam
           </button>
         )}
       </div>
+      {isOffline && (onInvestigate || (!isSafe && onReport)) && (
+        <div style={S.offlineNote}>You're offline — online features are unavailable.</div>
+      )}
 
       {/* Privacy / source badge */}
       <div style={S.sourceLine}>
         {result.isPreliminary
           ? '⚡ Instant check from rule engine — AI is confirming…'
           : isCloud
-            ? '☁️ Checked online. Personal details were hidden before sending.'
-            : '🔒 Checked on this phone. Nothing was uploaded.'}
+            ? '☁️ Your message was checked online with personal details hidden.'
+            : '🔒 Your message stayed on this phone.'}
         {result.durationMs != null && !result.isPreliminary && (
           <span style={S.timing}> · {(result.durationMs / 1000).toFixed(1)}s</span>
+        )}
+        {!result.isPreliminary && !isCloud && communityQueried && (
+          <div style={S.communityDisclosure}>
+            We checked an anonymous fingerprint of this {communityQueried.kind === 'phone' ? 'phone number' : 'link'} against reports from other users.
+          </div>
         )}
       </div>
 
@@ -296,6 +304,18 @@ const S = {
     flexShrink: 0,
     fontSize: '1rem',
     marginTop: 1,
+  },
+  offlineNote: {
+    fontSize: '0.8125rem',
+    color: '#888',
+    marginBottom: 6,
+    fontStyle: 'italic',
+  },
+  communityDisclosure: {
+    marginTop: 4,
+    fontSize: '0.8125rem',
+    color: '#666',
+    lineHeight: 1.4,
   },
   actionRow: {
     display: 'flex',

@@ -76,17 +76,19 @@ export const SCAM_TRENDS_DEFAULT =
   'Current scam trends in Nigeria: BVN/NIN verification scams are rising. ' +
   'Fake bank debit alerts with phishing links. Investment-doubling schemes. ' +
   'Fake job offers requiring upfront registration fees. ' +
-  'Impersonation of government agencies (EFCC, CBN, NCC).';
+  'Impersonation of government agencies and regulatory bodies.';
 
 // Set true to return deterministic demo data from check_community_reports
 // instead of querying Firestore. Switch to false once Firestore rules are deployed.
 export const USE_MOCK_REPORTS = false;
 
+// Per-device daily cap for cloud checks (cloud AI + agent runs + cloud OCR combined).
+// Stored in localStorage; resets at midnight.
+export const DAILY_CLOUD_LIMIT = 15;
+
 // Maximum tool-call steps in one agent run before forcing the final answer.
 export const AGENT_MAX_STEPS = 6;
 
-// IMPORTANT: Verify this model name in the Firebase AI Logic docs before shipping.
-// Supported models: https://firebase.google.com/docs/ai-logic/models
 // Confirmed working model name as of Nov 2026 (gemini-2.0-flash-lite was retired).
 export const CLOUD_MODEL = 'gemini-3.5-flash-lite';
 

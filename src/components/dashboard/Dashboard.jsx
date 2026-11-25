@@ -9,7 +9,7 @@
 import { useState, useEffect } from 'react';
 import snapshot from '../../data/evalSnapshot.json';
 import { getOnDeviceAvailability } from '../../ai/availability';
-import { onDeviceCheck, cloudCheck, hybridCheck, warmUpDeviceModel } from '../../ai/checkMessage';
+import { onDeviceCheck, cloudCheck, warmUpDeviceModel } from '../../ai/checkMessage';
 import { aiOnlyCheck } from '../../dev/aiOnlyCheck';
 import { TEST_MESSAGES } from '../../dev/testMessages';
 import ComparisonChart from './ComparisonChart';
@@ -167,7 +167,6 @@ export default function Dashboard() {
     const tasks = [
       { key: 'aiOnly',  fn: (t) => aiOnlyCheck(t) },
       { key: 'rulesAi', fn: (t) => onDeviceCheck(t) },
-      { key: 'hybrid',  fn: (t) => hybridCheck(t) },
       ...(includeCloud ? [{ key: 'cloud', fn: (t) => cloudCheck(t) }] : []),
     ];
 
