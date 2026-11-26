@@ -102,6 +102,7 @@ firebase.json, .firebaserc
 ### Scope (feature freeze as of session 11)
 
 14. **No new features.** Only: bug fixes, speed improvements, offline/PWA work, deployment, documentation.
+15. **`LICENSE` is GitHub's unmodified Apache-2.0 template.** Never edit, reformat, or regenerate it.
 
 ---
 
